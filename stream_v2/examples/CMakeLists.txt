@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.11)
 project(stream2_example)
 
+include(CheckCCompilerFlag)
+
 if(NOT WIN32)
     option(BUILD_LIBZMQ "Build ZeroMQ library from source" OFF)
 else()
@@ -51,7 +53,11 @@ include_directories(
     )
 
 if(NOT "${CMAKE_C_COMPILER_ID}" MATCHES "MSVC")
-    add_compile_options(-mf16c -Wall -Wextra)
+    check_c_compiler_flag("-mf16c" COMPILER_SUPPORTS_MF16C)
+    if(COMPILER_SUPPORTS_MF16C)
+        add_compile_options(-mf16c)
+    endif()
+    add_compile_options(-Wall -Wextra)
 endif()
 
 add_library(stream2 STATIC
