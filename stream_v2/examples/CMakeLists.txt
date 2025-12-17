@@ -75,3 +75,35 @@ target_link_libraries(example
     stream2
     tinycbor
     )
+
+add_executable(stream2_writer_single_threaded stream2_writer_single_threaded.c)
+target_link_libraries(stream2_writer_single_threaded
+    ${LIBZMQ_TARGET}
+    compression
+    stream2
+    tinycbor
+    )
+
+add_executable(check_stream2 check_stream2.c)
+target_link_libraries(check_stream2
+    ${LIBZMQ_TARGET}
+    compression
+    stream2
+    tinycbor
+    )
+
+add_executable(stream2_buffer stream2_buffer.c)
+target_link_libraries(stream2_buffer
+    ${LIBZMQ_TARGET}
+    compression
+    stream2
+    tinycbor
+    )
+
+add_executable(stream2_buffer_decode stream2_buffer_decode.c)
+target_link_libraries(stream2_buffer_decode
+    ${LIBZMQ_TARGET}
+    compression
+    stream2
+    tinycbor
+    )
