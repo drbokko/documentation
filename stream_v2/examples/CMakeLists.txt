@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.11)
 project(stream2_example)
 
 include(CheckCCompilerFlag)
+find_package(Threads REQUIRED)
 
 if(NOT WIN32)
     option(BUILD_LIBZMQ "Build ZeroMQ library from source" OFF)
@@ -106,4 +107,13 @@ target_link_libraries(stream2_buffer_decode
     compression
     stream2
     tinycbor
+    )
+
+add_executable(stream2_buffer_tiff stream2_buffer_tiff.c)
+target_link_libraries(stream2_buffer_tiff
+    ${LIBZMQ_TARGET}
+    compression
+    stream2
+    tinycbor
+    Threads::Threads
     )
