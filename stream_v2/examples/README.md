@@ -31,6 +31,7 @@ The examples use a shared helper library (`stream2_helpers`) that provides commo
 | `stream2_bifurcator` | **Stream relay/forwarder** for dual-NIC setups. Receives on one interface, buffers in RAM, and re-broadcasts raw messages on another interface without modification. |
 
 All buffer-based programs support the `STREAM2_BUFFER_GB` environment variable to set the memory buffer limit (default: 20 GB).
+Tested on a DGX Spark with the ConnectX7 and on a high performance Xeon EDGE server with a ConnectX 6.
 
 #### Stream Bifurcator Usage
 
