@@ -1,357 +1,42 @@
-#define _POSIX_C_SOURCE 200809L
-
-#include <inttypes.h>
-#include <errno.h>
-#include <signal.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <time.h>
-#include <zmq.h>
-
-static volatile sig_atomic_t g_stop = 0;
-
-#ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-#ifndef CLOCK_MONOTONIC
-#define CLOCK_MONOTONIC 1
-#endif
-/* Use QueryPerformanceCounter as a monotonic source */
-static int clock_gettime_monotonic(struct timespec* tp) {
-    LARGE_INTEGER freq, ctr;
-    if (!QueryPerformanceFrequency(&freq) || !QueryPerformanceCounter(&ctr))
-        return -1;
-    tp->tv_sec = (time_t)(ctr.QuadPart / freq.QuadPart);
-    tp->tv_nsec = (long)((ctr.QuadPart % freq.QuadPart) * 1000000000LL / freq.QuadPart);
-    return 0;
-}
-#define clock_gettime(id, tp) clock_gettime_monotonic(tp)
-
-/* Map Ctrl+C to our stop flag */
-static BOOL WINAPI console_ctrl_handler(DWORD ctrl_type) {
-    if (ctrl_type == CTRL_C_EVENT || ctrl_type == CTRL_BREAK_EVENT) {
-        g_stop = 1;
-        return TRUE;
-    }
-    return FALSE;
-}
-#endif
-
-#include "compression/src/compression.h"
+/*
+ * stream2_buffer.c - Buffer images in memory with zero-copy support
+ *
+ * Receives stream data over ZMQ, buffers images in memory (up to configurable
+ * limit), and reports throughput statistics. Uses zero-copy where possible.
+ * Does NOT decompress or save files.
+ */
+#include "stream2_common.h"
+#include "stream2_image_buffer.h"
+#include "stream2_stats.h"
 #include "stream2.h"
-
-struct buffered_image {
-    char* channel;
-    uint64_t image_id;
-    uint64_t width;
-    uint64_t height;
-    enum stream2_typed_array_tag tag;
-    size_t elem_size;
-    const void* data;
-    size_t data_size;
-    struct msg_owner* owner;  // non-NULL when zero-copy, shared per msg
-};
-
-struct buffer_ctx {
-    struct buffered_image* items;
-    size_t len;
-    size_t cap;
-    uint64_t total_bytes;
-    uint64_t bytes_limit;
-    int warned_limit;
-};
-
-struct stats {
-    uint64_t images_total;
-    uint64_t bytes_total;
-    uint64_t images_window;
-    uint64_t bytes_window;
-    struct timespec last_report;
-};
-
-static void handle_sigint(int sig) {
-    (void)sig;
-    g_stop = 1;
-}
-
-struct msg_owner {
-    zmq_msg_t msg;
-    size_t refs;
-};
-
-static enum stream2_result decode_bytes(const struct stream2_bytes* bytes,
-                                        const unsigned char** decoded,
-                                        size_t* decoded_len,
-                                        void** decompress_buffer) {
-    const struct stream2_compression compression = bytes->compression;
-
-    if (compression.algorithm == NULL) {
-        *decoded = (const unsigned char*)bytes->ptr;
-        *decoded_len = bytes->len;
-        *decompress_buffer = NULL;
-        return STREAM2_OK;
-    }
-
-    CompressionAlgorithm algorithm;
-    if (strcmp(compression.algorithm, "bslz4") == 0) {
-        algorithm = COMPRESSION_BSLZ4;
-    } else if (strcmp(compression.algorithm, "lz4") == 0) {
-        algorithm = COMPRESSION_LZ4;
-    } else {
-        return STREAM2_ERROR_NOT_IMPLEMENTED;
-    }
-
-    const size_t len = compression_decompress_buffer(
-            algorithm, NULL, 0, (const char*)bytes->ptr, bytes->len,
-            compression.elem_size);
-    if (len == COMPRESSION_ERROR)
-        return STREAM2_ERROR_DECODE;
-
-    void* buffer = malloc(len);
-    if (!buffer)
-        return STREAM2_ERROR_OUT_OF_MEMORY;
-
-    if (compression_decompress_buffer(algorithm, (char*)buffer, len,
-                                      (const char*)bytes->ptr, bytes->len,
-                                      compression.elem_size) != len)
-    {
-        free(buffer);
-        return STREAM2_ERROR_DECODE;
-    }
-
-    *decoded = (const unsigned char*)buffer;
-    *decoded_len = len;
-    *decompress_buffer = buffer;
-    return STREAM2_OK;
-}
-
-static enum stream2_result decode_typed_array(
-        const struct stream2_typed_array* array,
-        const unsigned char** data,
-        size_t* len,
-        size_t* elem_size,
-        void** decompress_buffer) {
-    enum stream2_result r;
-
-    uint64_t elem_size64;
-    if ((r = stream2_typed_array_elem_size(array, &elem_size64)))
-        return r;
-
-    if (elem_size64 > SIZE_MAX)
-        return STREAM2_ERROR_NOT_IMPLEMENTED;
-
-    *elem_size = elem_size64;
-
-    if ((r = decode_bytes(&array->data, data, len, decompress_buffer)))
-        return r;
-
-    *len /= *elem_size;
-
-    return STREAM2_OK;
-}
-
-static int buffer_image_data(const struct stream2_multidim_array* md,
-                             uint64_t image_id,
-                             const char* channel,
-                             struct buffer_ctx* buf,
-                             struct msg_owner** owner_slot,
-                             zmq_msg_t* src_msg) {
-    enum stream2_result r;
-    const unsigned char* data = NULL;
-    size_t len_elems = 0;
-    size_t elem_size = 0;
-    void* decompress_buffer = NULL;
-
-    const bool no_compression = (md->array.data.compression.algorithm == NULL);
-    const bool compressed = !no_compression;
-    const bool expected_shape = (md->dim[0] == 4364 && md->dim[1] == 4150);
-    const bool expected_type =
-            (md->array.tag == STREAM2_TYPED_ARRAY_UINT16_LITTLE_ENDIAN);
-
-    size_t data_size = 0;
-
-    if (compressed) {
-        // Store compressed bytes directly; avoid decompressing and copying.
-        data = (const unsigned char*)md->array.data.ptr;
-        data_size = md->array.data.len;
-        elem_size = md->array.data.compression.elem_size ?
-                    md->array.data.compression.elem_size : 1;
-    } else if (expected_shape && expected_type) {
-        data = (const unsigned char*)md->array.data.ptr;
-        elem_size = 2;
-        len_elems = md->array.data.len / elem_size;
-    } else {
-        if ((r = decode_typed_array(&md->array, &data, &len_elems, &elem_size,
-                                    &decompress_buffer)))
-        {
-            return r;
-        }
-    }
-
-    uint64_t w = md->dim[1];
-    uint64_t h = md->dim[0];
-    if (w == 0 || h == 0) {
-        free(decompress_buffer);
-        return STREAM2_ERROR_PARSE;
-    }
-
-    if (!compressed) {
-        uint64_t total_elems = w * h;
-        if (total_elems != len_elems) {
-            free(decompress_buffer);
-            return STREAM2_ERROR_PARSE;
-        }
-
-        uint64_t data_size_u64 = total_elems * elem_size;
-        if (data_size_u64 > SIZE_MAX) {
-            free(decompress_buffer);
-            return STREAM2_ERROR_OUT_OF_MEMORY;
-        }
-        data_size = (size_t)data_size_u64;
-    }
-
-    if (buf->total_bytes + data_size > buf->bytes_limit) {
-        if (!buf->warned_limit) {
-            fprintf(stderr, "buffer limit reached (%" PRIu64 " bytes); "
-                            "skipping further images\n",
-                    buf->bytes_limit);
-            buf->warned_limit = 1;
-        }
-        free(decompress_buffer);
-        return STREAM2_OK;
-    }
-
-    if (buf->len == buf->cap) {
-        size_t new_cap = buf->cap ? buf->cap * 2 : 64;
-        void* new_items = realloc(buf->items, new_cap * sizeof(*buf->items));
-        if (!new_items) {
-            free(decompress_buffer);
-            return STREAM2_ERROR_OUT_OF_MEMORY;
-        }
-        buf->items = new_items;
-        buf->cap = new_cap;
-    }
-
-    struct buffered_image* bi = &buf->items[buf->len++];
-    bi->channel = channel ? strdup(channel) : NULL;
-    bi->image_id = image_id;
-    bi->width = w;
-    bi->height = h;
-    bi->tag = md->array.tag;
-    bi->elem_size = elem_size;
-    bi->data_size = data_size;
-    bi->owner = NULL;
-
-    if (compressed) {
-        if (*owner_slot == NULL) {
-            *owner_slot = calloc(1, sizeof(**owner_slot));
-            if (!*owner_slot) {
-                return STREAM2_ERROR_OUT_OF_MEMORY;
-            }
-            zmq_msg_init(&(*owner_slot)->msg);
-            zmq_msg_move(&(*owner_slot)->msg, src_msg);  // transfer frame
-        }
-        (*owner_slot)->refs++;
-        bi->owner = *owner_slot;
-        bi->data = data;
-        bi->data_size = data_size;
-    } else if (no_compression && expected_shape && expected_type) {
-        // Zero-copy: keep ownership of the ZMQ frame to retain data lifetime.
-        if (*owner_slot == NULL) {
-            *owner_slot = calloc(1, sizeof(**owner_slot));
-            if (!*owner_slot) {
-                return STREAM2_ERROR_OUT_OF_MEMORY;
-            }
-            zmq_msg_init(&(*owner_slot)->msg);
-            zmq_msg_move(&(*owner_slot)->msg, src_msg);  // transfer frame
-        }
-        (*owner_slot)->refs++;
-        bi->owner = *owner_slot;
-        bi->data = data;
-        bi->data_size = data_size;
-    } else {
-        bi->data = malloc(data_size);
-        if (!bi->data) {
-            free(decompress_buffer);
-            return STREAM2_ERROR_OUT_OF_MEMORY;
-        }
-        memcpy((void*)bi->data, data, data_size);
-        bi->data_size = data_size;
-    }
-
-    buf->total_bytes += data_size;
-
-    free(decompress_buffer);
-    return STREAM2_OK;
-}
-
-static double time_diff_sec(const struct timespec* a,
-                            const struct timespec* b) {
-    return (double)(a->tv_sec - b->tv_sec) +
-           (double)(a->tv_nsec - b->tv_nsec) / 1e9;
-}
-
-static void report_stats(struct stats* s, struct buffer_ctx* buf, int force) {
-    struct timespec now;
-    clock_gettime(CLOCK_MONOTONIC, &now);
-    double elapsed = time_diff_sec(&now, &s->last_report);
-    if (!force && elapsed < 3.0)
-        return;
-
-    if (elapsed <= 0.0)
-        elapsed = 1e-9;
-
-    double gbps = (s->bytes_window * 8.0) / (elapsed * 1e9);
-    double gigabytes_total = s->bytes_total / 1e9;
-    double gigabytes_buffer = buf ? (double)buf->total_bytes / 1e9 : 0.0;
-    double gigabytes_cap = buf ? (double)buf->bytes_limit / 1e9 : 0.0;
-    size_t buffered_images = buf ? buf->len : 0;
-
-    printf("\rimages: %" PRIu64 "  received: %.3f GB  rate: %.3f Gbit/s"
-           "  buffer: %zu img / %.3f GB (cap %.1f GB)",
-           s->images_total, gigabytes_total, gbps, buffered_images,
-           gigabytes_buffer, gigabytes_cap);
-    if (force)
-        printf("\n");
-    fflush(stdout);
-
-    s->images_window = 0;
-    s->bytes_window = 0;
-    s->last_report = now;
-}
+#include <zmq.h>
 
 static void handle_msg(struct stream2_msg* msg,
                        size_t msg_size,
-                       struct stats* s,
-                       struct buffer_ctx* buf,
-                       struct msg_owner** owner_slot,
+                       struct stream2_stats* s,
+                       struct stream2_buffer_ctx* buf,
+                       struct stream2_msg_owner** owner_slot,
                        zmq_msg_t* src_msg) {
     if (msg->type == STREAM2_MSG_IMAGE) {
-        s->images_total++;
-        s->images_window++;
-        s->bytes_total += msg_size;
-        s->bytes_window += msg_size;
+        stream2_stats_add_image(s, msg_size);
         if (buf) {
             struct stream2_image_msg* im = (struct stream2_image_msg*)msg;
             for (size_t i = 0; i < im->data.len; i++) {
                 struct stream2_image_data* d = &im->data.ptr[i];
-                buffer_image_data(&d->data, im->image_id, d->channel, buf,
-                                  owner_slot, src_msg);
+                stream2_buffer_image(&d->data, im->image_id, d->channel, buf,
+                                     owner_slot, src_msg);
             }
         }
     } else {
-        s->bytes_total += msg_size;
-        s->bytes_window += msg_size;
+        stream2_stats_add_bytes(s, msg_size);
     }
 }
 
 static enum stream2_result parse_msg(const uint8_t* msg_data,
                                      size_t msg_size,
-                                     struct stats* s,
-                                     struct buffer_ctx* buf,
-                                     struct msg_owner** owner_slot,
+                                     struct stream2_stats* s,
+                                     struct stream2_buffer_ctx* buf,
+                                     struct stream2_msg_owner** owner_slot,
                                      zmq_msg_t* src_msg) {
     enum stream2_result r;
 
@@ -368,30 +53,6 @@ static enum stream2_result parse_msg(const uint8_t* msg_data,
     return STREAM2_OK;
 }
 
-static void free_buffer(struct buffer_ctx* buf) {
-    for (size_t i = 0; i < buf->len; i++) {
-        free(buf->items[i].channel);
-        if (buf->items[i].owner) {
-            if (buf->items[i].owner->refs > 0)
-                buf->items[i].owner->refs--;
-        } else {
-            free((void*)buf->items[i].data);
-        }
-    }
-    // Close any remaining owners when refcount reaches zero.
-    for (size_t i = 0; i < buf->len; i++) {
-        if (buf->items[i].owner && buf->items[i].owner->refs == 0) {
-            zmq_msg_close(&buf->items[i].owner->msg);
-            free(buf->items[i].owner);
-            buf->items[i].owner = NULL;
-        }
-    }
-    free(buf->items);
-    buf->items = NULL;
-    buf->len = buf->cap = 0;
-    buf->total_bytes = 0;
-}
-
 int main(int argc, char** argv) {
     if (argc != 2) {
         fprintf(stderr, "usage: %s HOST\n", argv[0]);
@@ -404,7 +65,6 @@ int main(int argc, char** argv) {
     void* ctx = zmq_ctx_new();
     void* socket = zmq_socket(ctx, ZMQ_PULL);
 
-    // Raise buffers and high-water mark to avoid dropping bursts.
     int hwm = 10000;
     zmq_setsockopt(socket, ZMQ_RCVHWM, &hwm, sizeof(hwm));
     int rcvbuf = 16 * 1024 * 1024;
@@ -416,47 +76,25 @@ int main(int argc, char** argv) {
     zmq_msg_t msg;
     zmq_msg_init(&msg);
 
-#ifndef _WIN32
-    struct sigaction sa = {0};
-    sa.sa_handler = handle_sigint;
-    sigaction(SIGINT, &sa, NULL);
-#else
-    SetConsoleCtrlHandler(console_ctrl_handler, TRUE);
-#endif
+    stream2_install_signal_handler();
 
-    struct stats s = {0};
-    uint64_t buffer_limit_bytes = 20ULL * 1024ULL * 1024ULL * 1024ULL;  // default 20 GB
-    const char* env_limit = getenv("STREAM2_BUFFER_GB");
-    if (env_limit && *env_limit) {
-        char* endp = NULL;
-        errno = 0;
-        unsigned long long gb = strtoull(env_limit, &endp, 10);
-        if (errno == 0 && endp && *endp == '\0' && gb > 0) {
-            buffer_limit_bytes = gb * 1024ULL * 1024ULL * 1024ULL;
-        } else {
-            fprintf(stderr, "WARN: STREAM2_BUFFER_GB invalid, using default 20GB\n");
-        }
-    }
-    struct buffer_ctx buf = {
-        .items = NULL,
-        .len = 0,
-        .cap = 0,
-        .total_bytes = 0,
-        .bytes_limit = buffer_limit_bytes,
-        .warned_limit = 0,
-    };
-    clock_gettime(CLOCK_MONOTONIC, &s.last_report);
+    struct stream2_stats s = {0};
+    stream2_stats_init(&s);
+
+    uint64_t buffer_limit = stream2_parse_buffer_limit_gb(20);
+    struct stream2_buffer_ctx buf;
+    stream2_buffer_init(&buf, buffer_limit);
 
     for (;;) {
         if (g_stop)
             break;
 
-        struct msg_owner* owner_slot = NULL;
+        struct stream2_msg_owner* owner_slot = NULL;
 
         int rc = zmq_msg_recv(&msg, socket, 0);
         if (rc == -1) {
             if (errno == EAGAIN) {
-                report_stats(&s, &buf, 0);
+                stream2_stats_report(&s, &buf, 0);
                 if (g_stop)
                     break;
                 continue;
@@ -476,15 +114,13 @@ int main(int argc, char** argv) {
         if ((r = parse_msg(msg_data, msg_size, &s, &buf, &owner_slot, &msg)))
             break;
 
-        report_stats(&s, &buf, 0);
-
-        // If we used zero-copy, the frame ownership was moved; msg is empty.
+        stream2_stats_report(&s, &buf, 0);
     }
 
-    report_stats(&s, &buf, 1);
+    stream2_stats_report(&s, &buf, 1);
     zmq_msg_close(&msg);
     zmq_close(socket);
     zmq_ctx_term(ctx);
-    free_buffer(&buf);
+    stream2_buffer_free(&buf);
     return EXIT_FAILURE;
 }

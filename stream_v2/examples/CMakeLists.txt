@@ -91,51 +91,44 @@ target_link_libraries(stream2 PRIVATE
     tinycbor
     )
 
-add_executable(example example.c)
-target_link_libraries(example
-    ${LIBZMQ_TARGET}
-    compression
-    stream2
-    tinycbor
+# Shared helper library for examples
+add_library(stream2_helpers STATIC
+    stream2_common.c
+    stream2_common.h
+    stream2_stats.c
+    stream2_stats.h
+    stream2_decompress.c
+    stream2_decompress.h
+    stream2_image_buffer.c
+    stream2_image_buffer.h
+    stream2_tiff.c
+    stream2_tiff.h
     )
-
-add_executable(stream2_writer_single_threaded stream2_writer_single_threaded.c)
-target_link_libraries(stream2_writer_single_threaded
-    ${LIBZMQ_TARGET}
-    compression
-    stream2
-    tinycbor
-    )
-
-add_executable(check_stream2 check_stream2.c)
-target_link_libraries(check_stream2
-    ${LIBZMQ_TARGET}
-    compression
-    stream2
-    tinycbor
-    )
-
-add_executable(stream2_buffer stream2_buffer.c)
-target_link_libraries(stream2_buffer
-    ${LIBZMQ_TARGET}
-    compression
-    stream2
-    tinycbor
-    )
-
-add_executable(stream2_buffer_decode stream2_buffer_decode.c)
-target_link_libraries(stream2_buffer_decode
-    ${LIBZMQ_TARGET}
-    compression
-    stream2
-    tinycbor
-    )
-
-add_executable(stream2_buffer_tiff stream2_buffer_tiff.c)
-target_link_libraries(stream2_buffer_tiff
+target_link_libraries(stream2_helpers PUBLIC
     ${LIBZMQ_TARGET}
     compression
     stream2
     tinycbor
     Threads::Threads
     )
+
+add_executable(example example.c)
+target_link_libraries(example stream2_helpers)
+
+add_executable(stream2_writer_single_threaded stream2_writer_single_threaded.c)
+target_link_libraries(stream2_writer_single_threaded stream2_helpers)
+
+add_executable(check_stream2 check_stream2.c)
+target_link_libraries(check_stream2 stream2_helpers)
+
+add_executable(stream2_buffer stream2_buffer.c)
+target_link_libraries(stream2_buffer stream2_helpers)
+
+add_executable(stream2_buffer_decode stream2_buffer_decode.c)
+target_link_libraries(stream2_buffer_decode stream2_helpers)
+
+add_executable(stream2_buffer_tiff stream2_buffer_tiff.c)
+target_link_libraries(stream2_buffer_tiff stream2_helpers)
+
+add_executable(stream2_bifurcator stream2_bifurcator.c)
+target_link_libraries(stream2_bifurcator stream2_helpers)
