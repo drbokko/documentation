@@ -20,25 +20,45 @@
  *   STREAM2_BUFFER_GB      - Buffer limit in GB (default: 20)
  *   STREAM2_RCVBUF_MB      - Receive buffer size in MB (default: 256)
  *   STREAM2_SNDBUF_MB      - Send buffer size in MB (default: 256)
- *   STREAM2_CPU_AFFINITY   - CPU core to pin to (optional)
+ *   STREAM2_CPU_AFFINITY   - CPU core to pin to (optional, Linux only)
  *   STREAM2_BUSY_POLL_US   - Busy poll timeout in microseconds (default: 0)
  *   STREAM2_IO_THREADS     - ZMQ I/O threads (default: 2)
  *
- * For best performance with ConnectX-6/7:
+ * For best performance with ConnectX-6/7 (Linux):
  *   - Enable busy polling: STREAM2_BUSY_POLL_US=50
  *   - Pin to a CPU near the NIC: STREAM2_CPU_AFFINITY=0
  *   - Use large buffers: STREAM2_RCVBUF_MB=512 STREAM2_SNDBUF_MB=512
  *   - Ensure IRQ affinity is configured for the NIC
  */
+
+/* Must define _GNU_SOURCE before any includes for Linux-specific features */
+#if defined(__linux__)
+#define _GNU_SOURCE
+#endif
+
 #include "stream2_common.h"
 #include "stream2_image_buffer.h"
 #include "stream2_stats.h"
 #include "stream2.h"
 #include <zmq.h>
 
-#ifndef _WIN32
+/* Platform-specific headers for performance tuning */
+#if defined(__linux__)
 #include <sched.h>
 #include <sys/resource.h>
+#define STREAM2_HAS_CPU_AFFINITY 1
+#define STREAM2_HAS_REALTIME_SCHED 1
+#elif defined(__APPLE__)
+#include <sched.h>
+#define STREAM2_HAS_CPU_AFFINITY 0
+#define STREAM2_HAS_REALTIME_SCHED 0
+#elif !defined(_WIN32)
+#include <sched.h>
+#define STREAM2_HAS_CPU_AFFINITY 0
+#define STREAM2_HAS_REALTIME_SCHED 0
+#else
+#define STREAM2_HAS_CPU_AFFINITY 0
+#define STREAM2_HAS_REALTIME_SCHED 0
 #endif
 
 /* Extended stats for bifurcator */
@@ -127,7 +147,7 @@ static int parse_env_int(const char* name, int default_val) {
     return default_val;
 }
 
-#ifndef _WIN32
+#if STREAM2_HAS_CPU_AFFINITY
 static void set_cpu_affinity(int cpu) {
     if (cpu < 0)
         return;
@@ -143,7 +163,9 @@ static void set_cpu_affinity(int cpu) {
                 cpu);
     }
 }
+#endif
 
+#if STREAM2_HAS_REALTIME_SCHED
 static void set_realtime_priority(void) {
     struct sched_param param;
     param.sched_priority = sched_get_priority_max(SCHED_FIFO);
@@ -217,14 +239,22 @@ int main(int argc, char** argv) {
     if (busy_poll_us > 0)
         printf("  Busy polling:   %d us\n", busy_poll_us);
 
-#ifndef _WIN32
-    /* Set CPU affinity if requested */
+#if STREAM2_HAS_CPU_AFFINITY
+    /* Set CPU affinity if requested (Linux only) */
     if (cpu_affinity >= 0)
         set_cpu_affinity(cpu_affinity);
+#else
+    if (cpu_affinity >= 0)
+        fprintf(stderr, "  Note: CPU affinity not supported on this platform\n");
+#endif
 
-    /* Set realtime priority if requested */
+#if STREAM2_HAS_REALTIME_SCHED
+    /* Set realtime priority if requested (Linux only) */
     if (realtime)
         set_realtime_priority();
+#else
+    if (realtime)
+        fprintf(stderr, "  Note: Realtime scheduling not supported on this platform\n");
 #endif
 
     printf("\n");
@@ -276,10 +306,12 @@ int main(int argc, char** argv) {
     zmq_setsockopt(publisher, ZMQ_SNDTIMEO, &snd_timeout_ms,
                    sizeof(snd_timeout_ms));
 
-    /* Enable TCP_NODELAY for lower latency */
+    /* Enable TCP_NODELAY for lower latency (if available) */
+#ifdef ZMQ_TCP_NODELAY
     int tcp_nodelay = 1;
     zmq_setsockopt(publisher, ZMQ_TCP_NODELAY, &tcp_nodelay,
                    sizeof(tcp_nodelay));
+#endif
 
     /* Enable TCP keepalive */
     zmq_setsockopt(publisher, ZMQ_TCP_KEEPALIVE, &tcp_keepalive,
@@ -345,7 +377,9 @@ int main(int argc, char** argv) {
                     break;
                 }
                 /* Yield to other threads/processes occasionally */
-#ifndef _WIN32
+#if defined(_WIN32)
+                SwitchToThread();
+#else
                 sched_yield();
 #endif
             }
