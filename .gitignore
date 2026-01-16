@@ -10,3 +10,11 @@ CMakeFiles/
 cmake_install.cmake
 Makefile
 compile_commands.json
+stream_v2/examples/_deps/
+check_stream2
+example
+libstream2.a
+stream2_buffer
+stream2_buffer_decode
+stream2_buffer_tiff
+stream2_writer_single_threaded
