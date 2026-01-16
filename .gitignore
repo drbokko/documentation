@@ -18,3 +18,5 @@ stream2_buffer
 stream2_buffer_decode
 stream2_buffer_tiff
 stream2_writer_single_threaded
+stream_v2/examples/third_party/compression
+stream_v2/examples/third_party/tinycbor 
