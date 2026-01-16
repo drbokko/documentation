@@ -3,13 +3,49 @@
 #include <inttypes.h>
 #include <errno.h>
 #include <signal.h>
+#ifndef _WIN32
 #include <pthread.h>
+#define STREAM2_TIFF_THREADS_SUPPORTED 1
+#define STREAM2_TIFF_THREADS_WIN 0
+#else
+#define STREAM2_TIFF_THREADS_SUPPORTED 1
+#define STREAM2_TIFF_THREADS_WIN 1
+#endif
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <zmq.h>
+
+static volatile sig_atomic_t g_stop = 0;
+
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#ifndef CLOCK_MONOTONIC
+#define CLOCK_MONOTONIC 1
+#endif
+/* Use QueryPerformanceCounter as a monotonic source */
+static int clock_gettime_monotonic(struct timespec* tp) {
+    LARGE_INTEGER freq, ctr;
+    if (!QueryPerformanceFrequency(&freq) || !QueryPerformanceCounter(&ctr))
+        return -1;
+    tp->tv_sec = (time_t)(ctr.QuadPart / freq.QuadPart);
+    tp->tv_nsec = (long)((ctr.QuadPart % freq.QuadPart) * 1000000000LL / freq.QuadPart);
+    return 0;
+}
+#define clock_gettime(id, tp) clock_gettime_monotonic(tp)
+
+/* Map Ctrl+C to our stop flag */
+static BOOL WINAPI console_ctrl_handler(DWORD ctrl_type) {
+    if (ctrl_type == CTRL_C_EVENT || ctrl_type == CTRL_BREAK_EVENT) {
+        g_stop = 1;
+        return TRUE;
+    }
+    return FALSE;
+}
+#endif
 
 #include "compression/src/compression.h"
 #include "stream2.h"
@@ -49,8 +85,6 @@ struct stats {
     uint64_t bytes_window;
     struct timespec last_report;
 };
-
-static volatile sig_atomic_t g_stop = 0;
 
 static void handle_sigint(int sig) {
     (void)sig;
@@ -210,6 +244,20 @@ static int write_tiff(const char* path, const struct buffered_image* img) {
 
     fclose(f);
     return 0;
+}
+
+static void format_tiff_path(char* dst,
+                             size_t dst_size,
+                             const char* channel,
+                             uint64_t image_id) {
+    const char* base = "/dev/shm";
+    const char* fmt = "%s/stream2_%s_%06" PRIu64 ".tiff";
+#ifdef _WIN32
+    /* On Windows, use the RAM disk exposed at Z:\ */
+    base = "Z:/";
+    fmt = "%sstream2_%s_%06" PRIu64 ".tiff";
+#endif
+    snprintf(dst, dst_size, fmt, base, channel ? channel : "data", image_id);
 }
 
 static int buffer_image_data(const struct stream2_multidim_array* md,
@@ -459,6 +507,18 @@ static void free_buffer(struct buffer_ctx* buf) {
     buf->total_bytes = 0;
 }
 
+#if STREAM2_TIFF_THREADS_WIN
+struct write_ctx {
+    struct buffer_ctx* buf;
+    volatile LONG64 next;  /* starts at -1, increment to get index */
+    volatile LONG64 done;
+    struct timespec start;
+    long long total_ns;
+    uint64_t compressed_total;
+    uint64_t decompressed_total;
+    CRITICAL_SECTION stats_cs;
+};
+#elif STREAM2_TIFF_THREADS_SUPPORTED
 struct write_ctx {
     struct buffer_ctx* buf;
     pthread_mutex_t mu;
@@ -469,6 +529,17 @@ struct write_ctx {
     uint64_t compressed_total;
     uint64_t decompressed_total;
 };
+#else
+struct write_ctx {
+    struct buffer_ctx* buf;
+    size_t next;
+    size_t done;
+    struct timespec start;
+    long long total_ns;
+    uint64_t compressed_total;
+    uint64_t decompressed_total;
+};
+#endif
 
 static inline long long time_diff_ns(const struct timespec* a,
                                      const struct timespec* b) {
@@ -543,9 +614,7 @@ static void write_one_image(struct buffer_ctx* buf,
             : bi->tag;
 
     char filename[256];
-    snprintf(filename, sizeof(filename), "/dev/shm/stream2_%s_%06" PRIu64 ".tiff",
-             bi->channel ? bi->channel : "data",
-             bi->image_id);
+    format_tiff_path(filename, sizeof(filename), bi->channel, bi->image_id);
     if (write_tiff(filename, &out_img) != 0) {
         fprintf(stderr, "failed to write %s\n", filename);
     }
@@ -553,6 +622,37 @@ static void write_one_image(struct buffer_ctx* buf,
     free(tmp);
 }
 
+/* Thread worker */
+#if STREAM2_TIFF_THREADS_WIN
+static DWORD WINAPI writer_thread_win(LPVOID arg) {
+    struct write_ctx* ctx = (struct write_ctx*)arg;
+    for (;;) {
+        LONG64 idx64 = InterlockedIncrement64(&ctx->next) - 1;
+        size_t idx = (size_t)idx64;
+        if (idx >= ctx->buf->len)
+            break;
+        struct timespec t0, t1;
+        clock_gettime(CLOCK_MONOTONIC, &t0);
+        uint64_t cbytes = 0, dbytes = 0;
+        write_one_image(ctx->buf, idx, &cbytes, &dbytes);
+        clock_gettime(CLOCK_MONOTONIC, &t1);
+
+        EnterCriticalSection(&ctx->stats_cs);
+        ctx->total_ns += time_diff_ns(&t1, &t0);
+        ctx->done++;
+        ctx->compressed_total += cbytes;
+        ctx->decompressed_total += dbytes;
+        uint64_t done_u = (uint64_t)ctx->done;
+        size_t total = ctx->buf->len;
+        double pct = total ? (100.0 * (double)done_u / (double)total) : 100.0;
+        printf("\rWriting TIFFs: %" PRIu64 "/%zu (%.1f%%)", done_u, total,
+               pct);
+        fflush(stdout);
+        LeaveCriticalSection(&ctx->stats_cs);
+    }
+    return 0;
+}
+#elif STREAM2_TIFF_THREADS_SUPPORTED
 static void* writer_thread(void* arg) {
     struct write_ctx* ctx = (struct write_ctx*)arg;
     for (;;) {
@@ -573,44 +673,64 @@ static void* writer_thread(void* arg) {
         ctx->done++;
         ctx->compressed_total += cbytes;
         ctx->decompressed_total += dbytes;
-        double pct = (ctx->buf->len > 0)
-                         ? (100.0 * ctx->done / (double)ctx->buf->len)
-                         : 100.0;
-        printf("\rWriting TIFFs: %zu/%zu (%.1f%%)", ctx->done, ctx->buf->len,
-               pct);
+        size_t total = ctx->buf->len;
+        double pct = total ? (100.0 * (double)ctx->done / (double)total) : 100.0;
+        printf("\rWriting TIFFs: %zu/%zu (%.1f%%)", ctx->done, total, pct);
         fflush(stdout);
         pthread_mutex_unlock(&ctx->mu);
     }
     return NULL;
 }
+#endif
 
 static void flush_to_tiff(struct buffer_ctx* buf) {
     if (buf->len == 0)
         return;
 
-    int threads = 10;
-    const char* env_threads = getenv("STREAM2_TIFF_THREADS");
-    if (env_threads && *env_threads) {
-        char* endp = NULL;
-        long t = strtol(env_threads, &endp, 10);
-        if (endp && *endp == '\0' && t > 0 && t < 256)
-            threads = (int)t;
+    int threads = STREAM2_TIFF_THREADS_SUPPORTED ? 10 : 1;
+    if (STREAM2_TIFF_THREADS_SUPPORTED) {
+        const char* env_threads = getenv("STREAM2_TIFF_THREADS");
+        if (env_threads && *env_threads) {
+            char* endp = NULL;
+            long t = strtol(env_threads, &endp, 10);
+            if (endp && *endp == '\0' && t > 0 && t < 256)
+                threads = (int)t;
+        }
     }
 
     struct write_ctx ctx = {
         .buf = buf,
-        .mu = PTHREAD_MUTEX_INITIALIZER,
+#if STREAM2_TIFF_THREADS_WIN
+        .next = -1,  /* InterlockedIncrement64 => first index 0 */
+        .done = 0,
+#else
         .next = 0,
         .done = 0,
+#endif
         .total_ns = 0,
         .compressed_total = 0,
         .decompressed_total = 0,
     };
     clock_gettime(CLOCK_MONOTONIC, &ctx.start);
 
-    pthread_t* tids = calloc((size_t)threads, sizeof(pthread_t));
+#if STREAM2_TIFF_THREADS_WIN
+    HANDLE* tids = NULL;
+    tids = calloc((size_t)threads, sizeof(HANDLE));
     if (!tids) {
         fprintf(stderr, "WARN: cannot allocate threads array, falling back to single-thread\n");
+        threads = 1;
+    }
+    InitializeCriticalSection(&ctx.stats_cs);
+#elif STREAM2_TIFF_THREADS_SUPPORTED
+    pthread_t* tids = NULL;
+    tids = calloc((size_t)threads, sizeof(pthread_t));
+    if (!tids) {
+        fprintf(stderr, "WARN: cannot allocate threads array, falling back to single-thread\n");
+        threads = 1;
+    }
+#endif
+
+    if (threads <= 1 || !STREAM2_TIFF_THREADS_SUPPORTED) {
         uint64_t cbytes = 0, dbytes = 0;
         for (size_t i = 0; i < buf->len; i++) {
             write_one_image(buf, i, &cbytes, &dbytes);
@@ -623,35 +743,37 @@ static void flush_to_tiff(struct buffer_ctx* buf) {
             printf("\rWriting TIFFs: %zu/%zu (%.1f%%)", ctx.done, buf->len, pct);
             fflush(stdout);
         }
-        struct timespec end;
-        clock_gettime(CLOCK_MONOTONIC, &end);
-        double wall_sec = time_diff_ns(&end, &ctx.start) / 1e9;
-        double cpu_sec = ctx.total_ns / 1e9;
-        printf("\nTIFF flush done: images=%zu threads=1 wall=%.3fs cpu=%.3fs\n",
-               buf->len, wall_sec, cpu_sec);
-        if (ctx.compressed_total > 0) {
-            double ratio = (double)ctx.decompressed_total /
-                           (double)ctx.compressed_total;
-            printf("Compression ratio (decompressed/compressed): %.3f "
-                   "(compressed %.3f GB, decompressed %.3f GB)\n",
-                   ratio,
-                   ctx.compressed_total / 1e9,
-                   ctx.decompressed_total / 1e9);
+    } else {
+#if STREAM2_TIFF_THREADS_WIN
+        for (int i = 0; i < threads; i++) {
+            tids[i] = CreateThread(NULL, 0, writer_thread_win, &ctx, 0, NULL);
+            if (!tids[i]) {
+                fprintf(stderr, "WARN: CreateThread failed, reducing thread count\n");
+                threads = i;
+                break;
+            }
         }
-        return;
-    }
-
-    for (int i = 0; i < threads; i++) {
-        if (pthread_create(&tids[i], NULL, writer_thread, &ctx) != 0) {
-            fprintf(stderr, "WARN: pthread_create failed, reducing thread count\n");
-            threads = i;
-            break;
+        if (threads > 0) {
+            WaitForMultipleObjects((DWORD)threads, tids, TRUE, INFINITE);
+            for (int i = 0; i < threads; i++) {
+                if (tids[i]) CloseHandle(tids[i]);
+            }
         }
+        free(tids);
+#elif STREAM2_TIFF_THREADS_SUPPORTED
+        for (int i = 0; i < threads; i++) {
+            if (pthread_create(&tids[i], NULL, writer_thread, &ctx) != 0) {
+                fprintf(stderr, "WARN: pthread_create failed, reducing thread count\n");
+                threads = i;
+                break;
+            }
+        }
+        for (int i = 0; i < threads; i++) {
+            pthread_join(tids[i], NULL);
+        }
+        free(tids);
+#endif
     }
-    for (int i = 0; i < threads; i++) {
-        pthread_join(tids[i], NULL);
-    }
-    free(tids);
 
     struct timespec end;
     clock_gettime(CLOCK_MONOTONIC, &end);
@@ -668,6 +790,9 @@ static void flush_to_tiff(struct buffer_ctx* buf) {
                ctx.compressed_total / 1e9,
                ctx.decompressed_total / 1e9);
     }
+#if STREAM2_TIFF_THREADS_WIN
+    DeleteCriticalSection(&ctx.stats_cs);
+#endif
 }
 
 int main(int argc, char** argv) {
@@ -693,9 +818,13 @@ int main(int argc, char** argv) {
     zmq_msg_t msg;
     zmq_msg_init(&msg);
 
+#ifndef _WIN32
     struct sigaction sa = {0};
     sa.sa_handler = handle_sigint;
     sigaction(SIGINT, &sa, NULL);
+#else
+    SetConsoleCtrlHandler(console_ctrl_handler, TRUE);
+#endif
 
     struct stats s = {0};
     uint64_t buffer_limit_bytes = 20ULL * 1024ULL * 1024ULL * 1024ULL;  // default 20 GB

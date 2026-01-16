@@ -10,6 +10,35 @@
 #include <time.h>
 #include <zmq.h>
 
+static volatile sig_atomic_t g_stop = 0;
+
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#ifndef CLOCK_MONOTONIC
+#define CLOCK_MONOTONIC 1
+#endif
+/* Use QueryPerformanceCounter as a monotonic source */
+static int clock_gettime_monotonic(struct timespec* tp) {
+    LARGE_INTEGER freq, ctr;
+    if (!QueryPerformanceFrequency(&freq) || !QueryPerformanceCounter(&ctr))
+        return -1;
+    tp->tv_sec = (time_t)(ctr.QuadPart / freq.QuadPart);
+    tp->tv_nsec = (long)((ctr.QuadPart % freq.QuadPart) * 1000000000LL / freq.QuadPart);
+    return 0;
+}
+#define clock_gettime(id, tp) clock_gettime_monotonic(tp)
+
+/* Map Ctrl+C to our stop flag */
+static BOOL WINAPI console_ctrl_handler(DWORD ctrl_type) {
+    if (ctrl_type == CTRL_C_EVENT || ctrl_type == CTRL_BREAK_EVENT) {
+        g_stop = 1;
+        return TRUE;
+    }
+    return FALSE;
+}
+#endif
+
 #include "compression/src/compression.h"
 #include "stream2.h"
 
@@ -41,8 +70,6 @@ struct stats {
     uint64_t bytes_window;
     struct timespec last_report;
 };
-
-static volatile sig_atomic_t g_stop = 0;
 
 static void handle_sigint(int sig) {
     (void)sig;
@@ -389,9 +416,13 @@ int main(int argc, char** argv) {
     zmq_msg_t msg;
     zmq_msg_init(&msg);
 
+#ifndef _WIN32
     struct sigaction sa = {0};
     sa.sa_handler = handle_sigint;
     sigaction(SIGINT, &sa, NULL);
+#else
+    SetConsoleCtrlHandler(console_ctrl_handler, TRUE);
+#endif
 
     struct stats s = {0};
     uint64_t buffer_limit_bytes = 20ULL * 1024ULL * 1024ULL * 1024ULL;  // default 20 GB
