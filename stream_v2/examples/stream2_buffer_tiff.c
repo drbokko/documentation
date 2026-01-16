@@ -466,6 +466,8 @@ struct write_ctx {
     size_t done;
     struct timespec start;
     long long total_ns;
+    uint64_t compressed_total;
+    uint64_t decompressed_total;
 };
 
 static inline long long time_diff_ns(const struct timespec* a,
@@ -473,11 +475,18 @@ static inline long long time_diff_ns(const struct timespec* a,
     return (a->tv_sec - b->tv_sec) * 1000000000LL + (a->tv_nsec - b->tv_nsec);
 }
 
-static void write_one_image(struct buffer_ctx* buf, size_t idx) {
+static void write_one_image(struct buffer_ctx* buf,
+                            size_t idx,
+                            uint64_t* compressed_bytes,
+                            uint64_t* decompressed_bytes) {
     struct buffered_image* bi = &buf->items[idx];
     const void* out_data = bi->data;
     size_t out_size = bi->data_size;
     void* tmp = NULL;
+    if (compressed_bytes)
+        *compressed_bytes = 0;
+    if (decompressed_bytes)
+        *decompressed_bytes = 0;
 
     if (bi->compression_alg) {
         CompressionAlgorithm algorithm;
@@ -523,6 +532,9 @@ static void write_one_image(struct buffer_ctx* buf, size_t idx) {
         return;
     }
 
+    *compressed_bytes = bi->data_size;
+    *decompressed_bytes = out_size;
+
     struct buffered_image out_img = *bi;
     out_img.data = out_data;
     out_img.data_size = out_size;
@@ -552,12 +564,15 @@ static void* writer_thread(void* arg) {
             break;
         struct timespec t0, t1;
         clock_gettime(CLOCK_MONOTONIC, &t0);
-        write_one_image(ctx->buf, idx);
+        uint64_t cbytes = 0, dbytes = 0;
+        write_one_image(ctx->buf, idx, &cbytes, &dbytes);
         clock_gettime(CLOCK_MONOTONIC, &t1);
 
         pthread_mutex_lock(&ctx->mu);
         ctx->total_ns += time_diff_ns(&t1, &t0);
         ctx->done++;
+        ctx->compressed_total += cbytes;
+        ctx->decompressed_total += dbytes;
         double pct = (ctx->buf->len > 0)
                          ? (100.0 * ctx->done / (double)ctx->buf->len)
                          : 100.0;
@@ -588,14 +603,41 @@ static void flush_to_tiff(struct buffer_ctx* buf) {
         .next = 0,
         .done = 0,
         .total_ns = 0,
+        .compressed_total = 0,
+        .decompressed_total = 0,
     };
     clock_gettime(CLOCK_MONOTONIC, &ctx.start);
 
     pthread_t* tids = calloc((size_t)threads, sizeof(pthread_t));
     if (!tids) {
         fprintf(stderr, "WARN: cannot allocate threads array, falling back to single-thread\n");
-        for (size_t i = 0; i < buf->len; i++)
-            write_one_image(buf, i);
+        uint64_t cbytes = 0, dbytes = 0;
+        for (size_t i = 0; i < buf->len; i++) {
+            write_one_image(buf, i, &cbytes, &dbytes);
+            ctx.compressed_total += cbytes;
+            ctx.decompressed_total += dbytes;
+            ctx.done++;
+            double pct = (buf->len > 0)
+                             ? (100.0 * ctx.done / (double)buf->len)
+                             : 100.0;
+            printf("\rWriting TIFFs: %zu/%zu (%.1f%%)", ctx.done, buf->len, pct);
+            fflush(stdout);
+        }
+        struct timespec end;
+        clock_gettime(CLOCK_MONOTONIC, &end);
+        double wall_sec = time_diff_ns(&end, &ctx.start) / 1e9;
+        double cpu_sec = ctx.total_ns / 1e9;
+        printf("\nTIFF flush done: images=%zu threads=1 wall=%.3fs cpu=%.3fs\n",
+               buf->len, wall_sec, cpu_sec);
+        if (ctx.compressed_total > 0) {
+            double ratio = (double)ctx.decompressed_total /
+                           (double)ctx.compressed_total;
+            printf("Compression ratio (decompressed/compressed): %.3f "
+                   "(compressed %.3f GB, decompressed %.3f GB)\n",
+                   ratio,
+                   ctx.compressed_total / 1e9,
+                   ctx.decompressed_total / 1e9);
+        }
         return;
     }
 
@@ -617,6 +659,15 @@ static void flush_to_tiff(struct buffer_ctx* buf) {
     double cpu_sec = ctx.total_ns / 1e9;
     printf("\nTIFF flush done: images=%zu threads=%d wall=%.3fs cpu=%.3fs\n",
            buf->len, threads, wall_sec, cpu_sec);
+    if (ctx.compressed_total > 0) {
+        double ratio = (double)ctx.decompressed_total /
+                       (double)ctx.compressed_total;
+        printf("Compression ratio (decompressed/compressed): %.3f "
+               "(compressed %.3f GB, decompressed %.3f GB)\n",
+               ratio,
+               ctx.compressed_total / 1e9,
+               ctx.decompressed_total / 1e9);
+    }
 }
 
 int main(int argc, char** argv) {
