@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.11)
+cmake_minimum_required(VERSION 3.11...3.31)
 project(stream2_example)
 
 include(CheckCCompilerFlag)
@@ -12,21 +12,43 @@ endif()
 
 if(BUILD_LIBZMQ)
     include(FetchContent)
-    FetchContent_Declare(
-        libzmq
-        GIT_REPOSITORY https://github.com/zeromq/libzmq.git
-        GIT_TAG 4097855ddaaa65ed7b5e8cb86d143842a594eebd # v4.3.4
-        )
-    FetchContent_GetProperties(libzmq)
-    if(NOT libzmq_POPULATED)
-        FetchContent_Populate(libzmq)
-        set(BUILD_SHARED OFF CACHE INTERNAL "")
-        set(BUILD_STATIC ON CACHE INTERNAL "")
-        set(ENABLE_CURVE OFF CACHE BOOL "")
-        set(ENABLE_DRAFTS OFF CACHE BOOL "")
-        add_subdirectory("${libzmq_SOURCE_DIR}" "${libzmq_BINARY_DIR}" EXCLUDE_FROM_ALL)
-        unset(ZEROMQ_LIBRARY CACHE)
+
+    # CMake 4.0+ removed compatibility with cmake_minimum_required < 3.5
+    # libzmq v4.3.4 uses an older version, so we need this workaround
+    if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.0")
+        set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
     endif()
+
+    # Set options before fetching
+    set(BUILD_SHARED OFF CACHE INTERNAL "")
+    set(BUILD_STATIC ON CACHE INTERNAL "")
+    set(ENABLE_CURVE OFF CACHE BOOL "")
+    set(ENABLE_DRAFTS OFF CACHE BOOL "")
+
+    if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.28")
+        # CMake 3.28+ supports EXCLUDE_FROM_ALL in FetchContent_Declare
+        FetchContent_Declare(
+            libzmq
+            GIT_REPOSITORY https://github.com/zeromq/libzmq.git
+            GIT_TAG 4097855ddaaa65ed7b5e8cb86d143842a594eebd # v4.3.4
+            EXCLUDE_FROM_ALL
+            )
+        FetchContent_MakeAvailable(libzmq)
+    else()
+        # Older CMake requires manual FetchContent_Populate + add_subdirectory
+        FetchContent_Declare(
+            libzmq
+            GIT_REPOSITORY https://github.com/zeromq/libzmq.git
+            GIT_TAG 4097855ddaaa65ed7b5e8cb86d143842a594eebd # v4.3.4
+            )
+        FetchContent_GetProperties(libzmq)
+        if(NOT libzmq_POPULATED)
+            FetchContent_Populate(libzmq)
+            add_subdirectory("${libzmq_SOURCE_DIR}" "${libzmq_BINARY_DIR}" EXCLUDE_FROM_ALL)
+        endif()
+    endif()
+
+    unset(ZEROMQ_LIBRARY CACHE)
     set(LIBZMQ_TARGET libzmq-static)
 else()
     find_package(PkgConfig REQUIRED)
