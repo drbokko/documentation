@@ -3,6 +3,7 @@
  */
 #include "stream2_image_buffer.h"
 #include "stream2_decompress.h"
+#include <string.h>
 
 void stream2_buffer_init(struct stream2_buffer_ctx* buf, uint64_t bytes_limit) {
     buf->items = NULL;

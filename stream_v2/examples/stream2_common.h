@@ -9,7 +9,14 @@
 #ifndef STREAM2_COMMON_H
 #define STREAM2_COMMON_H
 
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+
+#if !defined(_POSIX_C_SOURCE) || _POSIX_C_SOURCE < 200809L
+#undef _POSIX_C_SOURCE
 #define _POSIX_C_SOURCE 200809L
+#endif
 
 #include <errno.h>
 #include <inttypes.h>
@@ -18,7 +25,25 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <pthread.h>
 #include <time.h>
+#include <sys/time.h>
+
+#ifndef CLOCK_MONOTONIC
+#define CLOCK_MONOTONIC 1
+#endif
+
+#ifndef clockid_t
+typedef int clockid_t;
+#endif
+
+#ifndef __has_builtin
+#define __has_builtin(x) 0
+#endif
+
+/* Ensure prototypes are visible even if feature macros hide them */
+int clock_gettime(clockid_t, struct timespec*);
+char* strdup(const char*);
 
 /* Global stop flag - set by signal handlers */
 extern volatile sig_atomic_t g_stop;
