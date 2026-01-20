@@ -520,8 +520,9 @@ int main(int argc, char** argv) {
          */
         int fwd_rc;
         if (owner_slot != NULL) {
-            /* Buffer took ownership, need to copy for forward.
-             * Get data from owner's message since original msg was moved. */
+            /* Buffer took ownership (one or more channels used zero-copy),
+             * need to copy for forward. Get data from owner's message since
+             * original msg was moved. */
             zmq_msg_t fwd_msg;
             zmq_msg_init_size(&fwd_msg, msg_size);
             const uint8_t* owner_data = (const uint8_t*)zmq_msg_data(&owner_slot->msg);
@@ -542,6 +543,8 @@ int main(int argc, char** argv) {
                     }
                 }
             }
+            /* Reinitialize msg for next receive (original was moved to owner_slot) */
+            zmq_msg_init(&msg);
         } else {
             /* Try zero-copy forward by moving the message */
             zmq_msg_t fwd_msg;

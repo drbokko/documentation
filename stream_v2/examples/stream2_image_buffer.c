@@ -22,6 +22,7 @@ static void free_owner(struct stream2_msg_owner* owner) {
 }
 
 void stream2_buffer_free(struct stream2_buffer_ctx* buf) {
+    /* First pass: free channel names, compression alg, and decrement refs */
     for (size_t i = 0; i < buf->len; i++) {
         free(buf->items[i].channel);
         free(buf->items[i].compression_alg);
@@ -32,10 +33,32 @@ void stream2_buffer_free(struct stream2_buffer_ctx* buf) {
             free((void*)buf->items[i].data);
         }
     }
+    
+    /* Second pass: free owners that have no more refs.
+     * Track which owners we've already freed to avoid double-free
+     * when multiple images share the same owner (multi-channel messages). */
     for (size_t i = 0; i < buf->len; i++) {
-        if (buf->items[i].owner && buf->items[i].owner->refs == 0) {
-            free_owner(buf->items[i].owner);
-            buf->items[i].owner = NULL;
+        struct stream2_msg_owner* owner = buf->items[i].owner;
+        if (owner && owner->refs == 0) {
+            /* Check if we've already seen this exact owner pointer earlier in the loop */
+            int already_seen = 0;
+            for (size_t j = 0; j < i; j++) {
+                if (buf->items[j].owner == owner) {
+                    already_seen = 1;
+                    break;
+                }
+            }
+            if (!already_seen) {
+                /* This is the first time we see this owner, free it and
+                 * set all references to this owner to NULL */
+                struct stream2_msg_owner* owner_to_free = owner;
+                for (size_t j = 0; j < buf->len; j++) {
+                    if (buf->items[j].owner == owner_to_free) {
+                        buf->items[j].owner = NULL;
+                    }
+                }
+                free_owner(owner_to_free);
+            }
         }
     }
     free(buf->items);
