@@ -10,11 +10,12 @@
 int stream2_write_tiff(const char* path,
                        const struct stream2_buffered_image* img);
 
-/* Format a TIFF filename for an image */
+/* Format a TIFF filename for an image (creates series folder if needed) */
 void stream2_format_tiff_path(char* dst,
                               size_t dst_size,
                               const char* channel,
-                              uint64_t image_id);
+                              uint64_t image_id,
+                              uint64_t series_id);
 
 /* Write one image from buffer, with decompression if needed */
 void stream2_write_one_image(struct stream2_buffer_ctx* buf,

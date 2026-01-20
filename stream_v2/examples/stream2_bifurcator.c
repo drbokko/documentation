@@ -23,6 +23,7 @@
  *   STREAM2_CPU_AFFINITY   - CPU core to pin to (optional, Linux only)
  *   STREAM2_BUSY_POLL_US   - Busy poll timeout in microseconds (default: 0)
  *   STREAM2_IO_THREADS     - ZMQ I/O threads (default: 2)
+ *   STREAM2_TIFF_THREADS   - Threads for TIFF writing on exit (default: 10)
  *
  * For best performance with ConnectX-6/7 (Linux):
  *   - Enable busy polling: STREAM2_BUSY_POLL_US=50
@@ -39,6 +40,7 @@
 #include "stream2_common.h"
 #include "stream2_image_buffer.h"
 #include "stream2_stats.h"
+#include "stream2_tiff.h"
 #include "stream2.h"
 #include <zmq.h>
 
@@ -46,19 +48,32 @@
 #if defined(__linux__)
 #include <sched.h>
 #include <sys/resource.h>
+#include <ifaddrs.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 #define STREAM2_HAS_CPU_AFFINITY 1
 #define STREAM2_HAS_REALTIME_SCHED 1
+#define STREAM2_HAS_IFADDRS 1
 #elif defined(__APPLE__)
 #include <sched.h>
+#include <ifaddrs.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 #define STREAM2_HAS_CPU_AFFINITY 0
 #define STREAM2_HAS_REALTIME_SCHED 0
+#define STREAM2_HAS_IFADDRS 1
 #elif !defined(_WIN32)
 #include <sched.h>
+#include <ifaddrs.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 #define STREAM2_HAS_CPU_AFFINITY 0
 #define STREAM2_HAS_REALTIME_SCHED 0
+#define STREAM2_HAS_IFADDRS 1
 #else
 #define STREAM2_HAS_CPU_AFFINITY 0
 #define STREAM2_HAS_REALTIME_SCHED 0
+#define STREAM2_HAS_IFADDRS 0
 #endif
 
 /* Extended stats for bifurcator */
@@ -98,7 +113,7 @@ static void bifurcator_report(struct bifurcator_stats* s,
     double gb_fwd = s->bytes_forwarded / 1e9;
 
     printf("\rimages: %" PRIu64 "  in: %.2f GB @ %.2f Gbps  "
-           "fwd: %" PRIu64 " msgs / %.2f GB  "
+           "fwd: %" PRIu64 " msgs (all types) / %.2f GB  "
            "buf: %zu / %.1f GB (cap %.0f GB)",
            s->base.images_total, gb_total, gbps_in, s->msgs_forwarded, gb_fwd,
            buffered, gb_buffer, gb_cap);
@@ -127,8 +142,8 @@ static void handle_msg(struct stream2_msg* msg,
             struct stream2_image_msg* im = (struct stream2_image_msg*)msg;
             for (size_t i = 0; i < im->data.len; i++) {
                 struct stream2_image_data* d = &im->data.ptr[i];
-                stream2_buffer_image(&d->data, im->image_id, d->channel, buf,
-                                     owner_slot, src_msg);
+                stream2_buffer_image(&d->data, im->image_id, im->series_id,
+                                     d->channel, buf, owner_slot, src_msg);
             }
         }
     } else {
@@ -146,6 +161,41 @@ static int parse_env_int(const char* name, int default_val) {
     }
     return default_val;
 }
+
+#if STREAM2_HAS_IFADDRS
+/* Resolve interface name to IPv4 address */
+static int resolve_interface_ip(const char* ifname, char* ip_out, size_t ip_out_size) {
+    struct ifaddrs* ifaddrs_list = NULL;
+    struct ifaddrs* ifa = NULL;
+    int found = 0;
+
+    if (getifaddrs(&ifaddrs_list) == -1) {
+        return 0;
+    }
+
+    for (ifa = ifaddrs_list; ifa != NULL; ifa = ifa->ifa_next) {
+        if (ifa->ifa_addr == NULL)
+            continue;
+
+        if (strcmp(ifa->ifa_name, ifname) != 0)
+            continue;
+
+        if (ifa->ifa_addr->sa_family == AF_INET) {
+            struct sockaddr_in* sin = (struct sockaddr_in*)ifa->ifa_addr;
+            const char* ip_str = inet_ntoa(sin->sin_addr);
+            if (ip_str) {
+                strncpy(ip_out, ip_str, ip_out_size - 1);
+                ip_out[ip_out_size - 1] = '\0';
+                found = 1;
+                break;
+            }
+        }
+    }
+
+    freeifaddrs(ifaddrs_list);
+    return found;
+}
+#endif
 
 #if STREAM2_HAS_CPU_AFFINITY
 static void set_cpu_affinity(int cpu) {
@@ -225,9 +275,32 @@ int main(int argc, char** argv) {
 
     char source_addr[128];
     char publish_addr[128];
+    char publish_ip[64] = {0};
+    
+    /* Check if publish_interface is an interface name (not an IP) */
+#if STREAM2_HAS_IFADDRS
+    if (strchr(publish_interface, '.') == NULL && 
+        strchr(publish_interface, ':') == NULL) {
+        /* Looks like an interface name, try to resolve it */
+        if (resolve_interface_ip(publish_interface, publish_ip, sizeof(publish_ip))) {
+            printf("  Resolved interface %s -> IP %s\n", publish_interface, publish_ip);
+            snprintf(publish_addr, sizeof(publish_addr), "tcp://%s:%d",
+                     publish_ip, publish_port);
+        } else {
+            fprintf(stderr, "warning: could not resolve interface %s to IP, "
+                    "using as-is\n", publish_interface);
+            snprintf(publish_addr, sizeof(publish_addr), "tcp://%s:%d",
+                     publish_interface, publish_port);
+        }
+    } else
+#endif
+    {
+        /* Assume it's already an IP address */
+        snprintf(publish_addr, sizeof(publish_addr), "tcp://%s:%d",
+                 publish_interface, publish_port);
+    }
+    
     snprintf(source_addr, sizeof(source_addr), "tcp://%s:31001", source_host);
-    snprintf(publish_addr, sizeof(publish_addr), "tcp://%s:%d",
-             publish_interface, publish_port);
 
     printf("Stream Bifurcator (High-Performance)\n");
     printf("  Source:  %s\n", source_addr);
@@ -292,8 +365,8 @@ int main(int argc, char** argv) {
         return EXIT_FAILURE;
     }
 
-    /* Publisher socket (PUB) for re-broadcasting */
-    void* publisher = zmq_socket(ctx, ZMQ_PUB);
+    /* Publisher socket (PUSH) for re-broadcasting - matches Stream V2 protocol */
+    void* publisher = zmq_socket(ctx, ZMQ_PUSH);
 
     int sndhwm = 100000;
     zmq_setsockopt(publisher, ZMQ_SNDHWM, &sndhwm, sizeof(sndhwm));
@@ -301,8 +374,9 @@ int main(int argc, char** argv) {
     int sndbuf = sndbuf_mb * 1024 * 1024;
     zmq_setsockopt(publisher, ZMQ_SNDBUF, &sndbuf, sizeof(sndbuf));
 
-    /* Non-blocking send - drop if subscribers can't keep up */
-    int snd_timeout_ms = 0;
+    /* PUSH sockets will block if no PULL sockets are connected.
+     * Use a timeout to avoid hanging indefinitely. */
+    int snd_timeout_ms = 1000; /* 1 second timeout */
     zmq_setsockopt(publisher, ZMQ_SNDTIMEO, &snd_timeout_ms,
                    sizeof(snd_timeout_ms));
 
@@ -325,6 +399,19 @@ int main(int argc, char** argv) {
         zmq_ctx_term(ctx);
         return EXIT_FAILURE;
     }
+    
+    /* Get the actual bound endpoint (ZMQ may bind to * or 0.0.0.0) */
+    {
+        char endpoint[256];
+        size_t endpoint_len = sizeof(endpoint);
+        if (zmq_getsockopt(publisher, ZMQ_LAST_ENDPOINT, endpoint, &endpoint_len) == 0) {
+            printf("  Bound to: %s\n", endpoint);
+        }
+    }
+    
+    printf("\nReady to forward Stream V2 messages.\n");
+    printf("Downstream clients should use ZMQ_PULL sockets and connect to: %s\n\n",
+           publish_addr);
 
     zmq_msg_t msg;
     zmq_msg_init(&msg);
@@ -409,8 +496,9 @@ int main(int argc, char** argv) {
          * to transfer message ownership. We need to copy for buffering
          * anyway, but we can avoid one copy for the forward path.
          *
-         * Strategy: Copy the data for buffering first, then forward
-         * the original message using zero-copy if possible.
+         * Strategy: Extract data pointer before any moves, then parse/buffer,
+         * then forward. If buffer took ownership, we need to copy from the
+         * owner's message data.
          */
         const uint8_t* msg_data = (const uint8_t*)zmq_msg_data(&msg);
 
@@ -427,26 +515,53 @@ int main(int argc, char** argv) {
 
         /*
          * Forward the message. If the buffer took ownership via zero-copy,
-         * we need to make a copy. Otherwise we can potentially forward
-         * with zero-copy.
+         * we need to make a copy from the owner's message. Otherwise we can
+         * potentially forward with zero-copy.
          */
         int fwd_rc;
         if (owner_slot != NULL) {
-            /* Buffer took ownership, need to copy for forward */
+            /* Buffer took ownership, need to copy for forward.
+             * Get data from owner's message since original msg was moved. */
             zmq_msg_t fwd_msg;
             zmq_msg_init_size(&fwd_msg, msg_size);
-            memcpy(zmq_msg_data(&fwd_msg), msg_data, msg_size);
-            fwd_rc = zmq_msg_send(&fwd_msg, publisher, ZMQ_DONTWAIT);
-            if (fwd_rc == -1)
+            const uint8_t* owner_data = (const uint8_t*)zmq_msg_data(&owner_slot->msg);
+            memcpy(zmq_msg_data(&fwd_msg), owner_data, msg_size);
+            fwd_rc = zmq_msg_send(&fwd_msg, publisher, 0);
+            if (fwd_rc == -1) {
                 zmq_msg_close(&fwd_msg);
+                /* EAGAIN on PUSH socket means no PULL sockets connected or buffer full */
+                if (errno == EAGAIN) {
+                    static int warned_no_receivers = 0;
+                    if (!warned_no_receivers) {
+                        fprintf(stderr,
+                                "\nWarning: PUSH socket cannot send - "
+                                "no PULL sockets connected or send buffer full!\n"
+                                "Make sure downstream clients (e.g., stream2_buffer_tiff) "
+                                "are connected with ZMQ_PULL sockets.\n");
+                        warned_no_receivers = 1;
+                    }
+                }
+            }
         } else {
             /* Try zero-copy forward by moving the message */
             zmq_msg_t fwd_msg;
             zmq_msg_init(&fwd_msg);
             zmq_msg_move(&fwd_msg, &msg);
-            fwd_rc = zmq_msg_send(&fwd_msg, publisher, ZMQ_DONTWAIT);
+            fwd_rc = zmq_msg_send(&fwd_msg, publisher, 0);
             if (fwd_rc == -1) {
                 zmq_msg_close(&fwd_msg);
+                /* EAGAIN on PUSH socket means no PULL sockets connected or buffer full */
+                if (errno == EAGAIN) {
+                    static int warned_no_receivers = 0;
+                    if (!warned_no_receivers) {
+                        fprintf(stderr,
+                                "\nWarning: PUSH socket cannot send - "
+                                "no PULL sockets connected or send buffer full!\n"
+                                "Make sure downstream clients (e.g., stream2_buffer_tiff) "
+                                "are connected with ZMQ_PULL sockets.\n");
+                        warned_no_receivers = 1;
+                    }
+                }
             } else {
                 stats.zero_copy_forwards++;
             }
@@ -457,6 +572,8 @@ int main(int argc, char** argv) {
         if (fwd_rc == -1) {
             if (errno != EAGAIN) {
                 stats.forward_errors++;
+                fprintf(stderr, "error: zmq_msg_send failed: %s\n",
+                        zmq_strerror(errno));
             }
         } else {
             stats.msgs_forwarded++;
@@ -472,12 +589,20 @@ done:
     printf("\nSummary:\n");
     printf("  Total received:  %" PRIu64 " images, %.3f GB\n",
            stats.base.images_total, stats.base.bytes_total / 1e9);
-    printf("  Total forwarded: %" PRIu64 " msgs, %.3f GB\n",
+    printf("  Total forwarded: %" PRIu64 " msgs (start+images+end), %.3f GB\n",
            stats.msgs_forwarded, stats.bytes_forwarded / 1e9);
     printf("  Zero-copy fwds:  %" PRIu64 "\n", stats.zero_copy_forwards);
     printf("  Forward errors:  %" PRIu64 "\n", stats.forward_errors);
     printf("  Buffered:        %zu images, %.3f GB\n", buf.len,
            (double)buf.total_bytes / 1e9);
+
+    /* Save buffered images to TIFF files before cleanup */
+    if (buf.len > 0) {
+        int tiff_threads = parse_env_int("STREAM2_TIFF_THREADS", 10);
+        printf("\nSaving %zu buffered images to TIFF files...\n", buf.len);
+        stream2_flush_buffer_to_tiff_mt(&buf, tiff_threads);
+        printf("Done saving TIFF files.\n");
+    }
 
     zmq_msg_close(&msg);
     zmq_close(receiver);

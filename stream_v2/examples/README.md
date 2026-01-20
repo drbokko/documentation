@@ -42,7 +42,7 @@ The bifurcator is designed for machines with two fast network interfaces, acting
 ./stream2_bifurcator 192.168.1.100 192.168.2.1 31002
 ```
 
-Downstream clients can connect using ZMQ SUB socket to the publish address. The bifurcator uses non-blocking sends, so if subscribers can't keep up, messages will be dropped on the forwarding side (but still buffered locally).
+Downstream clients should connect using ZMQ_PULL sockets (matching the Stream V2 protocol). Compatible with all Stream V2 client programs like `stream2_buffer_tiff`, `stream2_buffer`, etc. The bifurcator uses PUSH sockets with a timeout, so if receivers can't keep up, sends will timeout (but messages are still buffered locally).
 
 #### Performance Tuning for ConnectX-6/7 NICs
 

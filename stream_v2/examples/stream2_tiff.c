@@ -6,9 +6,12 @@
 
 #ifndef _WIN32
 #include <pthread.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #define STREAM2_TIFF_THREADS_SUPPORTED 1
 #define STREAM2_TIFF_THREADS_WIN 0
 #else
+#include <direct.h>
 #define STREAM2_TIFF_THREADS_SUPPORTED 1
 #define STREAM2_TIFF_THREADS_WIN 1
 #endif
@@ -198,14 +201,37 @@ int stream2_write_tiff(const char* path,
 void stream2_format_tiff_path(char* dst,
                               size_t dst_size,
                               const char* channel,
-                              uint64_t image_id) {
+                              uint64_t image_id,
+                              uint64_t series_id) {
     const char* base = "/dev/shm";
-    const char* fmt = "%s/stream2_%s_%06" PRIu64 ".tiff";
+    char series_dir[256];
+    char full_path[512];
+    
 #ifdef _WIN32
     base = "Z:/";
-    fmt = "%sstream2_%s_%06" PRIu64 ".tiff";
+    snprintf(series_dir, sizeof(series_dir), "%sserie_%06" PRIu64, base, series_id);
+    snprintf(full_path, sizeof(full_path), "%s\\stream2_%s_%06" PRIu64 ".tiff",
+             series_dir, channel ? channel : "data", image_id);
+#else
+    snprintf(series_dir, sizeof(series_dir), "%s/serie_%06" PRIu64, base, series_id);
+    snprintf(full_path, sizeof(full_path), "%s/stream2_%s_%06" PRIu64 ".tiff",
+             series_dir, channel ? channel : "data", image_id);
 #endif
-    snprintf(dst, dst_size, fmt, base, channel ? channel : "data", image_id);
+    
+    /* Create series directory if it doesn't exist */
+#ifdef _WIN32
+    /* On Windows, _mkdir returns -1 if directory exists, so ignore errors */
+    _mkdir(series_dir);
+#else
+    /* Check if directory exists, create if not */
+    struct stat st = {0};
+    if (stat(series_dir, &st) == -1) {
+        mkdir(series_dir, 0755);
+    }
+#endif
+    
+    strncpy(dst, full_path, dst_size - 1);
+    dst[dst_size - 1] = '\0';
 }
 
 void stream2_write_one_image(struct stream2_buffer_ctx* buf,
@@ -282,7 +308,7 @@ void stream2_write_one_image(struct stream2_buffer_ctx* buf,
 
     char filename[256];
     stream2_format_tiff_path(filename, sizeof(filename), bi->channel,
-                             bi->image_id);
+                             bi->image_id, bi->series_id);
     if (stream2_write_tiff(filename, &out_img) != 0) {
         fprintf(stderr, "failed to write %s\n", filename);
     }
@@ -302,7 +328,7 @@ void stream2_flush_buffer_to_tiff(struct stream2_buffer_ctx* buf) {
         }
         char filename[256];
         stream2_format_tiff_path(filename, sizeof(filename), bi->channel,
-                                 bi->image_id);
+                                 bi->image_id, bi->series_id);
         if (stream2_write_tiff(filename, bi) != 0) {
             fprintf(stderr, "failed to write %s\n", filename);
         }

@@ -18,6 +18,7 @@ struct stream2_msg_owner {
 struct stream2_buffered_image {
     char* channel;
     uint64_t image_id;
+    uint64_t series_id;
     uint64_t width;
     uint64_t height;
     enum stream2_typed_array_tag tag;
@@ -49,6 +50,7 @@ void stream2_buffer_free(struct stream2_buffer_ctx* buf);
 enum stream2_result stream2_buffer_image(
         const struct stream2_multidim_array* md,
         uint64_t image_id,
+        uint64_t series_id,
         const char* channel,
         struct stream2_buffer_ctx* buf,
         struct stream2_msg_owner** owner_slot,
@@ -58,6 +60,7 @@ enum stream2_result stream2_buffer_image(
 enum stream2_result stream2_buffer_image_copy(
         const struct stream2_multidim_array* md,
         uint64_t image_id,
+        uint64_t series_id,
         const char* channel,
         struct stream2_buffer_ctx* buf);
 

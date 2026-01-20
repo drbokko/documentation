@@ -60,6 +60,7 @@ static enum stream2_result ensure_capacity(struct stream2_buffer_ctx* buf) {
 enum stream2_result stream2_buffer_image(
         const struct stream2_multidim_array* md,
         uint64_t image_id,
+        uint64_t series_id,
         const char* channel,
         struct stream2_buffer_ctx* buf,
         struct stream2_msg_owner** owner_slot,
@@ -137,6 +138,7 @@ enum stream2_result stream2_buffer_image(
     struct stream2_buffered_image* bi = &buf->items[buf->len++];
     bi->channel = channel ? strdup(channel) : NULL;
     bi->image_id = image_id;
+    bi->series_id = series_id;
     bi->width = w;
     bi->height = h;
     bi->tag = md->array.tag;
@@ -190,6 +192,7 @@ enum stream2_result stream2_buffer_image(
 enum stream2_result stream2_buffer_image_copy(
         const struct stream2_multidim_array* md,
         uint64_t image_id,
+        uint64_t series_id,
         const char* channel,
         struct stream2_buffer_ctx* buf) {
     enum stream2_result r;
@@ -243,6 +246,7 @@ enum stream2_result stream2_buffer_image_copy(
     struct stream2_buffered_image* bi = &buf->items[buf->len++];
     bi->channel = channel ? strdup(channel) : NULL;
     bi->image_id = image_id;
+    bi->series_id = series_id;
     bi->width = w;
     bi->height = h;
     bi->tag = md->array.tag;

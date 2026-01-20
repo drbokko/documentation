@@ -69,8 +69,8 @@ static void handle_msg(struct stream2_msg* msg,
             struct stream2_image_msg* im = (struct stream2_image_msg*)msg;
             for (size_t i = 0; i < im->data.len; i++) {
                 struct stream2_image_data* d = &im->data.ptr[i];
-                stream2_buffer_image_copy(&d->data, im->image_id, d->channel,
-                                          buf);
+                stream2_buffer_image_copy(&d->data, im->image_id, im->series_id,
+                                          d->channel, buf);
             }
         }
     }
