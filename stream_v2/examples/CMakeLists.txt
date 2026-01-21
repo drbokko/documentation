@@ -1,6 +1,11 @@
 cmake_minimum_required(VERSION 3.11...3.31)
 project(stream2_example)
 
+# Place build artifacts under bin/lib alongside the chosen build directory.
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib")
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+
 include(CheckCCompilerFlag)
 find_package(Threads REQUIRED)
 

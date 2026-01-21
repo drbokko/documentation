@@ -14,8 +14,5 @@ stream_v2/examples/_deps/
 check_stream2
 example
 *.a
-stream2_buffer
-stream2_buffer_decode
-stream2_buffer_tiff
-stream2_bifurcator
-stream2_writer_single_threaded
+*/bin/*
+*/lib/*
