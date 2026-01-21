@@ -4,9 +4,9 @@
 #include "stream2_tiff.h"
 #include "compression/src/compression.h"
 #include <errno.h>
-#include <sys/statvfs.h>
 
 #ifndef _WIN32
+#include <sys/statvfs.h>
 #include <pthread.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -14,6 +14,7 @@
 #define STREAM2_TIFF_THREADS_WIN 0
 #else
 #include <direct.h>
+    /* Windows: no statvfs; skip disk-space check */
 #define STREAM2_TIFF_THREADS_SUPPORTED 1
 #define STREAM2_TIFF_THREADS_WIN 1
 #endif
@@ -337,7 +338,8 @@ void stream2_write_one_image(struct stream2_buffer_ctx* buf,
     stream2_format_tiff_path(filename, sizeof(filename), bi->channel,
                              bi->image_id, bi->series_id);
 
-    /* Preflight space check: avoid partial writes. */
+#ifndef _WIN32
+    /* Preflight space check (POSIX only): avoid partial writes. */
     struct statvfs svfs;
     if (statvfs(filename, &svfs) == 0) {
         unsigned long long free_bytes =
@@ -352,6 +354,7 @@ void stream2_write_one_image(struct stream2_buffer_ctx* buf,
             return;
         }
     }
+#endif
 
     if (stream2_write_tiff(filename, &out_img) != 0) {
         fprintf(stderr, "failed to write %s\n", filename);
