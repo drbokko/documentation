@@ -294,3 +294,4 @@ int main(int argc, char** argv) {
     stream2_buffer_free(&buf);
     return EXIT_FAILURE;
 }
+
