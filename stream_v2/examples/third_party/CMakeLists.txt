@@ -1,4 +1,8 @@
-add_subdirectory(compression)
+# Build compression into the top-level build _deps directory to keep sources clean.
+add_subdirectory(
+    ${CMAKE_CURRENT_SOURCE_DIR}/compression
+    ${CMAKE_BINARY_DIR}/_deps/compression
+    EXCLUDE_FROM_ALL)
 
 add_library(tinycbor OBJECT
     tinycbor/src/cborencoder.c
