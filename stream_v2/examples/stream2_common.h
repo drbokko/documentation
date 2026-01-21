@@ -47,10 +47,6 @@ typedef int clockid_t;
 #define __has_builtin(x) 0
 #endif
 
-/* Ensure prototypes are visible even if feature macros hide them */
-int clock_gettime(clockid_t, struct timespec*);
-char* strdup(const char*);
-
 /* Global stop flag - set by signal handlers */
 extern volatile sig_atomic_t g_stop;
 /* Set when disk I/O detects out-of-space to halt writers */
