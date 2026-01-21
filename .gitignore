@@ -14,5 +14,5 @@ stream_v2/examples/_deps/
 check_stream2
 example
 *.a
-*/bin/*
-*/lib/*
+bin/
+lib/
