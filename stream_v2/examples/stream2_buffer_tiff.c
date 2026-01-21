@@ -25,6 +25,8 @@ struct iface_stats {
     uint64_t rx_errs;
     uint64_t rx_drop;
     uint64_t rx_frame;
+    uint64_t tx_errs;
+    uint64_t tx_drop;
 };
 
 static int parse_iface_line(const char* line,
@@ -50,8 +52,6 @@ static int parse_iface_line(const char* line,
     (void)rx_multicast;
     (void)tx_bytes;
     (void)tx_packets;
-    (void)tx_errs;
-    (void)tx_drop;
     (void)tx_fifo;
     (void)tx_colls;
     (void)tx_carrier;
@@ -62,6 +62,8 @@ static int parse_iface_line(const char* line,
     st->rx_errs = rx_errs;
     st->rx_drop = rx_drop;
     st->rx_frame = rx_frame;
+    st->tx_errs = tx_errs;
+    st->tx_drop = tx_drop;
     return 0;
 }
 
@@ -212,8 +214,10 @@ int main(int argc, char** argv) {
     if (have_iface_stats) {
         fprintf(stderr,
                 "net iface %s start: rx_drop=%" PRIu64 " rx_err=%" PRIu64
-                " rx_frame=%" PRIu64 "\n",
-                iface, net_start.rx_drop, net_start.rx_errs, net_start.rx_frame);
+                " rx_frame=%" PRIu64 " tx_drop=%" PRIu64 " tx_err=%" PRIu64
+                "\n",
+                iface, net_start.rx_drop, net_start.rx_errs, net_start.rx_frame,
+                net_start.tx_drop, net_start.tx_errs);
     }
 
     void* ctx = zmq_ctx_new();
@@ -277,12 +281,17 @@ int main(int argc, char** argv) {
         if (read_iface_stats(iface, &net_end) == 0) {
             fprintf(stderr,
                     "net iface %s end:   rx_drop=%" PRIu64 " rx_err=%" PRIu64
-                    " rx_frame=%" PRIu64 " (delta drop=%" PRIu64
-                    " err=%" PRIu64 " frame=%" PRIu64 ")\n",
+                    " rx_frame=%" PRIu64 " tx_drop=%" PRIu64 " tx_err=%" PRIu64
+                    " (delta rx_drop=%" PRIu64 " rx_err=%" PRIu64
+                    " rx_frame=%" PRIu64 " tx_drop=%" PRIu64
+                    " tx_err=%" PRIu64 ")\n",
                     iface, net_end.rx_drop, net_end.rx_errs, net_end.rx_frame,
+                    net_end.tx_drop, net_end.tx_errs,
                     net_end.rx_drop - net_start.rx_drop,
                     net_end.rx_errs - net_start.rx_errs,
-                    net_end.rx_frame - net_start.rx_frame);
+                    net_end.rx_frame - net_start.rx_frame,
+                    net_end.tx_drop - net_start.tx_drop,
+                    net_end.tx_errs - net_start.tx_errs);
         } else {
             fprintf(stderr,
                     "warn: failed to read final network stats for %s\n", iface);
