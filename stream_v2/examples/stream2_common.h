@@ -53,6 +53,8 @@ char* strdup(const char*);
 
 /* Global stop flag - set by signal handlers */
 extern volatile sig_atomic_t g_stop;
+/* Set when disk I/O detects out-of-space to halt writers */
+extern volatile sig_atomic_t g_out_of_space;
 
 #ifdef _WIN32
 #ifndef CLOCK_MONOTONIC

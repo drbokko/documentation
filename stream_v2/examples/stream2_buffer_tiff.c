@@ -11,6 +11,139 @@
 #include "stream2_tiff.h"
 #include "stream2.h"
 #include <zmq.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <ifaddrs.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <net/if.h>
+#include <inttypes.h>
+
+struct iface_stats {
+    uint64_t rx_packets;
+    uint64_t rx_errs;
+    uint64_t rx_drop;
+    uint64_t rx_frame;
+};
+
+static int parse_iface_line(const char* line,
+                            const char* iface,
+                            struct iface_stats* st) {
+    char name[64] = {0};
+    unsigned long long rx_bytes, rx_packets, rx_errs, rx_drop, rx_fifo,
+            rx_frame, rx_compressed, rx_multicast;
+    unsigned long long tx_bytes, tx_packets, tx_errs, tx_drop, tx_fifo,
+            tx_colls, tx_carrier, tx_compressed;
+    int n = sscanf(line,
+                   " %63[^:]: %llu %llu %llu %llu %llu %llu %llu %llu %llu "
+                   "%llu %llu %llu %llu %llu %llu",
+                   name, &rx_bytes, &rx_packets, &rx_errs, &rx_drop, &rx_fifo,
+                   &rx_frame, &rx_compressed, &rx_multicast, &tx_bytes,
+                   &tx_packets, &tx_errs, &tx_drop, &tx_fifo, &tx_colls,
+                   &tx_carrier);
+    if (n != 16)
+        return -1;
+    (void)rx_bytes;
+    (void)rx_fifo;
+    (void)rx_compressed;
+    (void)rx_multicast;
+    (void)tx_bytes;
+    (void)tx_packets;
+    (void)tx_errs;
+    (void)tx_drop;
+    (void)tx_fifo;
+    (void)tx_colls;
+    (void)tx_carrier;
+    (void)tx_compressed;
+    if (strcmp(name, iface) != 0)
+        return 1;
+    st->rx_packets = rx_packets;
+    st->rx_errs = rx_errs;
+    st->rx_drop = rx_drop;
+    st->rx_frame = rx_frame;
+    return 0;
+}
+
+static int read_iface_stats(const char* iface, struct iface_stats* st) {
+    FILE* f = fopen("/proc/net/dev", "r");
+    if (!f)
+        return -1;
+    char line[512];
+    int found = 0;
+    if (!fgets(line, sizeof(line), f) || !fgets(line, sizeof(line), f)) {
+        fclose(f);
+        return -1;
+    }
+    while (fgets(line, sizeof(line), f)) {
+        int r = parse_iface_line(line, iface, st);
+        if (r == 0) {
+            found = 1;
+            break;
+        }
+    }
+    fclose(f);
+    return found ? 0 : -1;
+}
+
+static int pick_default_iface(char* dst, size_t dst_size) {
+    FILE* f = fopen("/proc/net/dev", "r");
+    if (!f)
+        return -1;
+    char line[512];
+    if (!fgets(line, sizeof(line), f) || !fgets(line, sizeof(line), f)) {
+        fclose(f);
+        return -1;
+    }
+    while (fgets(line, sizeof(line), f)) {
+        char name[64] = {0};
+        if (sscanf(line, " %63[^:]:", name) == 1) {
+            if (strcmp(name, "lo") == 0)
+                continue;
+            strncpy(dst, name, dst_size - 1);
+            dst[dst_size - 1] = '\0';
+            fclose(f);
+            return 0;
+        }
+    }
+    fclose(f);
+    return -1;
+}
+
+static int select_iface_for_host(const char* host, char* dst, size_t dst_size) {
+    struct in_addr target;
+    if (inet_aton(host, &target) == 0)
+        return -1;
+
+    uint32_t ip = ntohl(target.s_addr);
+    uint32_t mask = 0xFFFFFF00u; /* default /24 */
+    if ((ip & 0x80000000u) == 0) {         /* Class A */
+        mask = 0xFF000000u;
+    } else if ((ip & 0xC0000000u) == 0x80000000u) { /* Class B */
+        mask = 0xFFFF0000u;
+    } /* else Class C / default /24 */
+
+    struct ifaddrs* ifs = NULL;
+    if (getifaddrs(&ifs) != 0)
+        return -1;
+    int found = -1;
+    for (struct ifaddrs* it = ifs; it; it = it->ifa_next) {
+        if (!it->ifa_addr || it->ifa_addr->sa_family != AF_INET)
+            continue;
+        if (it->ifa_flags & IFF_LOOPBACK)
+            continue;
+        struct sockaddr_in* sin = (struct sockaddr_in*)it->ifa_addr;
+        uint32_t iface_ip = ntohl(sin->sin_addr.s_addr);
+        if ((iface_ip & mask) == (ip & mask)) {
+            strncpy(dst, it->ifa_name, dst_size - 1);
+            dst[dst_size - 1] = '\0';
+            found = 0;
+            break;
+        }
+    }
+    freeifaddrs(ifs);
+    return found;
+}
 
 static void handle_msg(struct stream2_msg* msg,
                        size_t msg_size,
@@ -62,6 +195,26 @@ int main(int argc, char** argv) {
 
     char address[100];
     sprintf(address, "tcp://%s:31001", argv[1]);
+
+    char iface[64] = {0};
+    const char* env_iface = getenv("STREAM2_NET_IFACE");
+    if (env_iface && *env_iface) {
+        strncpy(iface, env_iface, sizeof(iface) - 1);
+    } else if (select_iface_for_host(argv[1], iface, sizeof(iface)) != 0 &&
+               pick_default_iface(iface, sizeof(iface)) != 0) {
+        fprintf(stderr, "warn: could not auto-detect network interface\n");
+    }
+
+    struct iface_stats net_start = {0};
+    struct iface_stats net_end = {0};
+    int have_iface_stats = iface[0] != '\0' &&
+            read_iface_stats(iface, &net_start) == 0;
+    if (have_iface_stats) {
+        fprintf(stderr,
+                "net iface %s start: rx_drop=%" PRIu64 " rx_err=%" PRIu64
+                " rx_frame=%" PRIu64 "\n",
+                iface, net_start.rx_drop, net_start.rx_errs, net_start.rx_frame);
+    }
 
     void* ctx = zmq_ctx_new();
     void* socket = zmq_socket(ctx, ZMQ_PULL);
@@ -120,6 +273,21 @@ int main(int argc, char** argv) {
 
     stream2_stats_report(&s, &buf, 1);
     stream2_flush_buffer_to_tiff_mt(&buf, 10);
+    if (have_iface_stats) {
+        if (read_iface_stats(iface, &net_end) == 0) {
+            fprintf(stderr,
+                    "net iface %s end:   rx_drop=%" PRIu64 " rx_err=%" PRIu64
+                    " rx_frame=%" PRIu64 " (delta drop=%" PRIu64
+                    " err=%" PRIu64 " frame=%" PRIu64 ")\n",
+                    iface, net_end.rx_drop, net_end.rx_errs, net_end.rx_frame,
+                    net_end.rx_drop - net_start.rx_drop,
+                    net_end.rx_errs - net_start.rx_errs,
+                    net_end.rx_frame - net_start.rx_frame);
+        } else {
+            fprintf(stderr,
+                    "warn: failed to read final network stats for %s\n", iface);
+        }
+    }
     zmq_msg_close(&msg);
     zmq_close(socket);
     zmq_ctx_term(ctx);

@@ -3,6 +3,8 @@
  */
 #include "stream2_tiff.h"
 #include "compression/src/compression.h"
+#include <errno.h>
+#include <sys/statvfs.h>
 
 #ifndef _WIN32
 #include <pthread.h>
@@ -25,6 +27,24 @@ static uint16_t sample_format_for_tag(enum stream2_typed_array_tag tag) {
     }
 }
 
+static inline int fwrite_checked(const void* ptr,
+                                 size_t size,
+                                 size_t nmemb,
+                                 FILE* f) {
+    if (fwrite(ptr, size, nmemb, f) != nmemb) {
+        if (errno == ENOSPC)
+            g_out_of_space = 1;
+        return -1;
+    }
+    return 0;
+}
+
+#define WRITE_OR_FAIL(ptr, size, nmemb) \
+    do {                                \
+        if (fwrite_checked(ptr, size, nmemb, f)) \
+            goto io_fail;               \
+    } while (0)
+
 int stream2_write_tiff(const char* path,
                        const struct stream2_buffered_image* img) {
     if (img->data_size > UINT32_MAX)
@@ -36,9 +56,9 @@ int stream2_write_tiff(const char* path,
 
     uint16_t magic = 42;
     uint32_t ifd_offset = 8;
-    fwrite("II", 1, 2, f);
-    fwrite(&magic, sizeof(magic), 1, f);
-    fwrite(&ifd_offset, sizeof(ifd_offset), 1, f);
+    WRITE_OR_FAIL("II", 1, 2);
+    WRITE_OR_FAIL(&magic, sizeof(magic), 1);
+    WRITE_OR_FAIL(&ifd_offset, sizeof(ifd_offset), 1);
 
     uint16_t entry_count = 11;
     uint32_t image_data_offset = 8 + 2 + entry_count * 12 + 4;
@@ -64,7 +84,7 @@ int stream2_write_tiff(const char* path,
     if (bits_tag != 8 && bits_tag != 16 && bits_tag != 32)
         bits_tag = 16;
 
-    fwrite(&entry_count, sizeof(entry_count), 1, f);
+    WRITE_OR_FAIL(&entry_count, sizeof(entry_count), 1);
 
     uint16_t tag = 256, type = 4;
     uint32_t count = 1;
@@ -75,127 +95,134 @@ int stream2_write_tiff(const char* path,
 
     /* ImageWidth */
     val32 = (uint32_t)img->width;
-    fwrite(&tag, 2, 1, f);
-    fwrite(&type, 2, 1, f);
-    fwrite(&count, 4, 1, f);
-    fwrite(&val32, 4, 1, f);
+    WRITE_OR_FAIL(&tag, 2, 1);
+    WRITE_OR_FAIL(&type, 2, 1);
+    WRITE_OR_FAIL(&count, 4, 1);
+    WRITE_OR_FAIL(&val32, 4, 1);
 
     /* ImageLength */
     tag = 257;
     val32 = (uint32_t)img->height;
-    fwrite(&tag, 2, 1, f);
-    fwrite(&type, 2, 1, f);
-    fwrite(&count, 4, 1, f);
-    fwrite(&val32, 4, 1, f);
+    WRITE_OR_FAIL(&tag, 2, 1);
+    WRITE_OR_FAIL(&type, 2, 1);
+    WRITE_OR_FAIL(&count, 4, 1);
+    WRITE_OR_FAIL(&val32, 4, 1);
 
     /* BitsPerSample */
     tag = 258;
     type = 3;
     count = 1;
     val16 = bits_tag;
-    fwrite(&tag, 2, 1, f);
-    fwrite(&type, 2, 1, f);
-    fwrite(&count, 4, 1, f);
-    fwrite(&val16, 2, 1, f);
-    fwrite(&pad16, 2, 1, f);
+    WRITE_OR_FAIL(&tag, 2, 1);
+    WRITE_OR_FAIL(&type, 2, 1);
+    WRITE_OR_FAIL(&count, 4, 1);
+    WRITE_OR_FAIL(&val16, 2, 1);
+    WRITE_OR_FAIL(&pad16, 2, 1);
 
     /* Compression (1 = none) */
     tag = 259;
     type = 3;
     count = 1;
     val16 = 1;
-    fwrite(&tag, 2, 1, f);
-    fwrite(&type, 2, 1, f);
-    fwrite(&count, 4, 1, f);
-    fwrite(&val16, 2, 1, f);
-    fwrite(&pad16, 2, 1, f);
+    WRITE_OR_FAIL(&tag, 2, 1);
+    WRITE_OR_FAIL(&type, 2, 1);
+    WRITE_OR_FAIL(&count, 4, 1);
+    WRITE_OR_FAIL(&val16, 2, 1);
+    WRITE_OR_FAIL(&pad16, 2, 1);
 
     /* Photometric (1 = min is black) */
     tag = 262;
     type = 3;
     count = 1;
     val16 = 1;
-    fwrite(&tag, 2, 1, f);
-    fwrite(&type, 2, 1, f);
-    fwrite(&count, 4, 1, f);
-    fwrite(&val16, 2, 1, f);
-    fwrite(&pad16, 2, 1, f);
+    WRITE_OR_FAIL(&tag, 2, 1);
+    WRITE_OR_FAIL(&type, 2, 1);
+    WRITE_OR_FAIL(&count, 4, 1);
+    WRITE_OR_FAIL(&val16, 2, 1);
+    WRITE_OR_FAIL(&pad16, 2, 1);
 
     /* StripOffsets */
     tag = 273;
     type = 4;
     count = 1;
     offset = image_data_offset;
-    fwrite(&tag, 2, 1, f);
-    fwrite(&type, 2, 1, f);
-    fwrite(&count, 4, 1, f);
-    fwrite(&offset, 4, 1, f);
+    WRITE_OR_FAIL(&tag, 2, 1);
+    WRITE_OR_FAIL(&type, 2, 1);
+    WRITE_OR_FAIL(&count, 4, 1);
+    WRITE_OR_FAIL(&offset, 4, 1);
 
     /* RowsPerStrip */
     tag = 278;
     type = 4;
     count = 1;
     val32 = (uint32_t)img->height;
-    fwrite(&tag, 2, 1, f);
-    fwrite(&type, 2, 1, f);
-    fwrite(&count, 4, 1, f);
-    fwrite(&val32, 4, 1, f);
+    WRITE_OR_FAIL(&tag, 2, 1);
+    WRITE_OR_FAIL(&type, 2, 1);
+    WRITE_OR_FAIL(&count, 4, 1);
+    WRITE_OR_FAIL(&val32, 4, 1);
 
     /* StripByteCounts */
     tag = 279;
     type = 4;
     count = 1;
     val32 = (uint32_t)img->data_size;
-    fwrite(&tag, 2, 1, f);
-    fwrite(&type, 2, 1, f);
-    fwrite(&count, 4, 1, f);
-    fwrite(&val32, 4, 1, f);
+    WRITE_OR_FAIL(&tag, 2, 1);
+    WRITE_OR_FAIL(&type, 2, 1);
+    WRITE_OR_FAIL(&count, 4, 1);
+    WRITE_OR_FAIL(&val32, 4, 1);
 
     /* SamplesPerPixel */
     tag = 277;
     type = 3;
     count = 1;
     val16 = samples_per_pixel;
-    fwrite(&tag, 2, 1, f);
-    fwrite(&type, 2, 1, f);
-    fwrite(&count, 4, 1, f);
-    fwrite(&val16, 2, 1, f);
-    fwrite(&pad16, 2, 1, f);
+    WRITE_OR_FAIL(&tag, 2, 1);
+    WRITE_OR_FAIL(&type, 2, 1);
+    WRITE_OR_FAIL(&count, 4, 1);
+    WRITE_OR_FAIL(&val16, 2, 1);
+    WRITE_OR_FAIL(&pad16, 2, 1);
 
     /* PlanarConfiguration (1 = chunky) */
     tag = 284;
     type = 3;
     count = 1;
     val16 = 1;
-    fwrite(&tag, 2, 1, f);
-    fwrite(&type, 2, 1, f);
-    fwrite(&count, 4, 1, f);
-    fwrite(&val16, 2, 1, f);
-    fwrite(&pad16, 2, 1, f);
+    WRITE_OR_FAIL(&tag, 2, 1);
+    WRITE_OR_FAIL(&type, 2, 1);
+    WRITE_OR_FAIL(&count, 4, 1);
+    WRITE_OR_FAIL(&val16, 2, 1);
+    WRITE_OR_FAIL(&pad16, 2, 1);
 
     /* SampleFormat */
     tag = 339;
     type = 3;
     count = 1;
     val16 = sample_format;
-    fwrite(&tag, 2, 1, f);
-    fwrite(&type, 2, 1, f);
-    fwrite(&count, 4, 1, f);
-    fwrite(&val16, 2, 1, f);
-    fwrite(&pad16, 2, 1, f);
+    WRITE_OR_FAIL(&tag, 2, 1);
+    WRITE_OR_FAIL(&type, 2, 1);
+    WRITE_OR_FAIL(&count, 4, 1);
+    WRITE_OR_FAIL(&val16, 2, 1);
+    WRITE_OR_FAIL(&pad16, 2, 1);
 
     /* next IFD offset = 0 */
     uint32_t zero = 0;
-    fwrite(&zero, sizeof(zero), 1, f);
+    WRITE_OR_FAIL(&zero, sizeof(zero), 1);
 
     /* Image data */
-    if (fwrite(img->data, 1, img->data_size, f) != img->data_size) {
-        fclose(f);
-        return -1;
-    }
+    if (fwrite_checked(img->data, 1, img->data_size, f) != 0)
+        goto io_fail;
 
     fclose(f);
     return 0;
+
+io_fail:
+    if (errno == ENOSPC) {
+        fprintf(stderr, "disk full while writing %s\n", path);
+    } else {
+        fprintf(stderr, "I/O error writing %s: %s\n", path, strerror(errno));
+    }
+    fclose(f);
+    return -1;
 }
 
 void stream2_format_tiff_path(char* dst,
@@ -309,6 +336,23 @@ void stream2_write_one_image(struct stream2_buffer_ctx* buf,
     char filename[256];
     stream2_format_tiff_path(filename, sizeof(filename), bi->channel,
                              bi->image_id, bi->series_id);
+
+    /* Preflight space check: avoid partial writes. */
+    struct statvfs svfs;
+    if (statvfs(filename, &svfs) == 0) {
+        unsigned long long free_bytes =
+                (unsigned long long)svfs.f_bavail * (unsigned long long)svfs.f_frsize;
+        const unsigned long long needed = out_size + 1 * 1024 * 1024ULL; /* +1MiB buffer */
+        if (free_bytes < needed) {
+            fprintf(stderr,
+                    "no space left to write %s (need %llu bytes, free %llu bytes)\n",
+                    filename, needed, free_bytes);
+            g_out_of_space = 1;
+            free(tmp);
+            return;
+        }
+    }
+
     if (stream2_write_tiff(filename, &out_img) != 0) {
         fprintf(stderr, "failed to write %s\n", filename);
     }
@@ -353,7 +397,7 @@ static DWORD WINAPI writer_thread_win(LPVOID arg) {
     for (;;) {
         LONG64 idx64 = InterlockedIncrement64(&ctx->next) - 1;
         size_t idx = (size_t)idx64;
-        if (idx >= ctx->buf->len)
+        if (idx >= ctx->buf->len || g_out_of_space)
             break;
         struct timespec t0, t1;
         clock_gettime(CLOCK_MONOTONIC, &t0);
@@ -372,6 +416,8 @@ static DWORD WINAPI writer_thread_win(LPVOID arg) {
         printf("\rWriting TIFFs: %" PRIu64 "/%zu (%.1f%%)", done_u, total, pct);
         fflush(stdout);
         LeaveCriticalSection(&ctx->stats_cs);
+        if (g_out_of_space)
+            break;
     }
     return 0;
 }
@@ -396,7 +442,7 @@ static void* writer_thread(void* arg) {
         pthread_mutex_lock(&ctx->mu);
         idx = ctx->next++;
         pthread_mutex_unlock(&ctx->mu);
-        if (idx >= ctx->buf->len)
+        if (idx >= ctx->buf->len || g_out_of_space)
             break;
         struct timespec t0, t1;
         clock_gettime(CLOCK_MONOTONIC, &t0);
@@ -415,6 +461,8 @@ static void* writer_thread(void* arg) {
         printf("\rWriting TIFFs: %zu/%zu (%.1f%%)", ctx->done, total, pct);
         fflush(stdout);
         pthread_mutex_unlock(&ctx->mu);
+        if (g_out_of_space)
+            break;
     }
     return NULL;
 }
@@ -424,6 +472,9 @@ void stream2_flush_buffer_to_tiff_mt(struct stream2_buffer_ctx* buf,
                                      int num_threads) {
     if (buf->len == 0)
         return;
+
+    /* Ensure out-of-space flag is clear before writing. */
+    g_out_of_space = 0;
 
     int threads = STREAM2_TIFF_THREADS_SUPPORTED ? num_threads : 1;
     if (threads <= 0)
