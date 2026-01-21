@@ -16,4 +16,3 @@ example
 *.a
 bin/
 lib/
-stream_v2/examples/third_party/compression/
