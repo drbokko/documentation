@@ -35,11 +35,11 @@
 #include <sys/time.h>
 #endif
 
+/* Windows doesn't have CLOCK_MONOTONIC or clockid_t */
+#ifdef _WIN32
 #ifndef CLOCK_MONOTONIC
 #define CLOCK_MONOTONIC 1
 #endif
-
-#ifndef clockid_t
 typedef int clockid_t;
 #endif
 

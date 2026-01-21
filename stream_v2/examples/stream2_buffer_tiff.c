@@ -17,10 +17,16 @@
 #include <inttypes.h>
 
 #ifndef _WIN32
+#include <sys/types.h>
+#include <sys/socket.h>
 #include <ifaddrs.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <net/if.h>
+/* IFF_LOOPBACK may not be exposed on all platforms */
+#ifndef IFF_LOOPBACK
+#define IFF_LOOPBACK 0x8
+#endif
 #endif
 
 struct iface_stats {
@@ -120,7 +126,7 @@ static int pick_default_iface(char* dst, size_t dst_size) {
 
 static int select_iface_for_host(const char* host, char* dst, size_t dst_size) {
     struct in_addr target;
-    if (inet_aton(host, &target) == 0)
+    if (inet_pton(AF_INET, host, &target) != 1)
         return -1;
 
     uint32_t ip = ntohl(target.s_addr);
