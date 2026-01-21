@@ -1,6 +1,10 @@
 /*
  * stream2_tiff.c - TIFF writing implementation
  */
+#ifdef __linux__
+#define _GNU_SOURCE
+#define _POSIX_C_SOURCE 200809L
+#endif
 #include "stream2_tiff.h"
 #include "compression/src/compression.h"
 #include <errno.h>

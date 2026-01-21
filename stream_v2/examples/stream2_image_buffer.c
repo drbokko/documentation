@@ -1,6 +1,10 @@
 /*
  * stream2_image_buffer.c - Image buffering implementation
  */
+#ifdef __linux__
+#define _GNU_SOURCE
+#define _POSIX_C_SOURCE 200809L
+#endif
 #include "stream2_image_buffer.h"
 #include "stream2_decompress.h"
 #include <string.h>
