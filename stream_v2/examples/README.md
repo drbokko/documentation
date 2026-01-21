@@ -109,7 +109,7 @@ cmake --build .
 
 ```$vs="C:\Program Files\Microsoft Visual Studio\18\Community"
 & "$vs\Common7\Tools\Launch-VsDevShell.ps1" -Arch x86 -HostArch x86
-cd stream_v2\examples
+cd documentation\stream_v2\examples
 cmake --build .
 ```
 

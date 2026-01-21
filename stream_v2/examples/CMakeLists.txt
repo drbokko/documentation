@@ -137,3 +137,13 @@ target_link_libraries(stream2_buffer_tiff stream2_helpers)
 
 add_executable(stream2_bifurcator stream2_bifurcator.c)
 target_link_libraries(stream2_bifurcator stream2_helpers)
+
+if(WIN32)
+    add_executable(stream2_buffer_tiff_ui_win stream2_buffer_tiff_ui_win.c)
+    target_link_libraries(stream2_buffer_tiff_ui_win
+        stream2_helpers
+        user32
+        gdi32
+        comctl32
+    )
+endif()
