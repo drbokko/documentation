@@ -149,3 +149,17 @@ if(WIN32)
         ws2_32
     )
 endif()
+
+# Add clean-build target (works on all platforms, especially useful for Windows/Visual Studio)
+# Note: For Makefile generators, 'make clean' already exists and works. This target
+# provides a way to clean everything including CMake cache files.
+add_custom_target(clean-build
+    COMMAND ${CMAKE_COMMAND} -E remove_directory ${CMAKE_BINARY_DIR}/bin
+    COMMAND ${CMAKE_COMMAND} -E remove_directory ${CMAKE_BINARY_DIR}/lib
+    COMMAND ${CMAKE_COMMAND} -E remove ${CMAKE_BINARY_DIR}/CMakeCache.txt
+    COMMAND ${CMAKE_COMMAND} -E remove_directory ${CMAKE_BINARY_DIR}/CMakeFiles
+    COMMAND ${CMAKE_COMMAND} -E remove ${CMAKE_BINARY_DIR}/cmake_install.cmake
+    COMMAND ${CMAKE_COMMAND} -E remove ${CMAKE_BINARY_DIR}/Makefile
+    COMMAND ${CMAKE_COMMAND} -E remove ${CMAKE_BINARY_DIR}/compile_commands.json
+    COMMENT "Cleaning build artifacts and CMake cache"
+)

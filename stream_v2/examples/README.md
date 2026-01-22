@@ -115,6 +115,15 @@ cmake . -DCMAKE_BUILD_TYPE=Debug -DBUILD_LIBZMQ=YES
 cmake --build .
 ```
 
+To clean build artifacts:
+```
+# For Makefile generators (Linux/macOS):
+make clean
+
+# For all generators (including Windows/Visual Studio):
+cmake --build . --target clean-build
+```
+
 ## Python
 
 `client.py` demonstrates how to receive and decode stream V2 data using Python 3. Fields of type `MultiDimArray` and `TypedArray` are represented as `numpy` arrays.
