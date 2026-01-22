@@ -36,20 +36,22 @@
 
 #define IDC_IP       1000
 #define IDC_PORT     1001
-#define IDC_STATUS   1002
-#define IDC_STATS    1003
-#define IDC_PROGRESS 1004
-#define IDC_SAVE     1005
-#define IDC_EXIT     1006
-#define IDC_START    1007
-#define IDC_STOP     1008
-#define IDC_FLUSH    1009
-#define IDC_SAVE_PROGRESS 1010
-#define IDC_NET_STATS 1011
+#define IDC_THREADS  1002
+#define IDC_STATUS   1003
+#define IDC_STATS    1004
+#define IDC_PROGRESS 1005
+#define IDC_SAVE     1006
+#define IDC_EXIT     1007
+#define IDC_START    1008
+#define IDC_STOP     1009
+#define IDC_FLUSH    1010
+#define IDC_SAVE_PROGRESS 1011
+#define IDC_NET_STATS 1012
 #define WM_APP_SAVE_DONE    (WM_APP + 1)
 #define WM_APP_RECV_STATE   (WM_APP + 2)
 #define WM_APP_SAVE_PROGRESS (WM_APP + 3)
-#define NUM_RECEIVERS 10
+#define MAX_RECEIVERS 50
+#define DEFAULT_RECEIVERS 10
 
 struct net_stats {
     uint64_t rx_packets;
@@ -65,6 +67,7 @@ struct app_ctx {
     HWND hwnd;
     HWND hIp;
     HWND hPort;
+    HWND hThreads;
     HWND hStatus;
     HWND hStats;
     HWND hProgress;
@@ -90,8 +93,9 @@ struct app_ctx {
     uint64_t bytes_limit;
 
     void* zmq_ctx;
-    HANDLE hRecvThreads[NUM_RECEIVERS];
+    HANDLE hRecvThreads[MAX_RECEIVERS];
     int num_active_receivers;
+    int num_receivers;
 
     struct net_stats net_start;
     struct net_stats net_current;
@@ -521,10 +525,24 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             if (InterlockedCompareExchange(&ctx->receiving, 0, 0)) break; /* already running */
             char ip[128] = {0};
             char port[16] = {0};
+            char threads_str[16] = {0};
             GetWindowText(ctx->hIp, ip, sizeof(ip));
             GetWindowText(ctx->hPort, port, sizeof(port));
+            GetWindowText(ctx->hThreads, threads_str, sizeof(threads_str));
             if (ip[0] == '\0') lstrcpyA(ip, "127.0.0.1");
             if (port[0] == '\0') lstrcpyA(port, "31001");
+            
+            /* Parse thread count */
+            int num_threads = DEFAULT_RECEIVERS;
+            if (threads_str[0] != '\0') {
+                char* endp = NULL;
+                long t = strtol(threads_str, &endp, 10);
+                if (endp && *endp == '\0' && t > 0 && t <= MAX_RECEIVERS) {
+                    num_threads = (int)t;
+                }
+            }
+            ctx->num_receivers = num_threads;
+            
             _snprintf(ctx->address, sizeof(ctx->address), "tcp://%s:%s", ip, port);
             InterlockedExchange(&ctx->recv_stop, 0);
 
@@ -538,9 +556,12 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             }
             LeaveCriticalSection(&ctx->net_cs);
 
+            /* Disable thread count edit while receiving */
+            EnableWindow(ctx->hThreads, FALSE);
+
             /* Spawn multiple receiver threads */
             ctx->num_active_receivers = 0;
-            for (int i = 0; i < NUM_RECEIVERS; i++) {
+            for (int i = 0; i < ctx->num_receivers; i++) {
                 struct recv_thread_param* p = (struct recv_thread_param*)malloc(sizeof(struct recv_thread_param));
                 if (!p) break;
                 p->ctx = ctx;
@@ -555,6 +576,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
 
             if (ctx->num_active_receivers == 0) {
                 InterlockedExchange(&ctx->receiving, 0);
+                EnableWindow(ctx->hThreads, TRUE);
                 PostMessage(ctx->hwnd, WM_APP_RECV_STATE, 0, 0);
             } else {
                 InterlockedExchange(&ctx->receiving, 1);
@@ -573,6 +595,10 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                     }
                 }
                 ctx->num_active_receivers = 0;
+                InterlockedExchange(&ctx->receiving, 0); /* Reset receiving flag */
+
+                /* Re-enable thread count edit */
+                EnableWindow(ctx->hThreads, TRUE);
 
                 /* Read final network stats */
                 EnterCriticalSection(&ctx->net_cs);
@@ -655,7 +681,8 @@ int main(int argc, char** argv) {
     InitializeCriticalSection(&ctx.net_cs);
     stream2_stats_init(&ctx.stats);
     ctx.num_active_receivers = 0;
-    for (int i = 0; i < NUM_RECEIVERS; i++) {
+    ctx.num_receivers = DEFAULT_RECEIVERS;
+    for (int i = 0; i < MAX_RECEIVERS; i++) {
         ctx.hRecvThreads[i] = NULL;
     }
 
@@ -678,23 +705,30 @@ int main(int argc, char** argv) {
 
     ctx.hwnd = CreateWindowEx(0, wc.lpszClassName, "DectrisStream2Demo_windows",
                               WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
-                              520, 380, NULL, NULL, hInst, NULL);
+                              520, 400, NULL, NULL, hInst, NULL);
     if (!ctx.hwnd) return EXIT_FAILURE;
     SetWindowLongPtr(ctx.hwnd, GWLP_USERDATA, (LONG_PTR)&ctx);
 
     ctx.hIp = CreateWindowEx(WS_EX_CLIENTEDGE, "EDIT", "127.0.0.1",
                              WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL,
-                             10, 10, 200, 24, ctx.hwnd, (HMENU)IDC_IP, hInst, NULL);
+                             10, 10, 150, 24, ctx.hwnd, (HMENU)IDC_IP, hInst, NULL);
     ctx.hPort = CreateWindowEx(WS_EX_CLIENTEDGE, "EDIT", "31001",
                                WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL,
-                               220, 10, 80, 24, ctx.hwnd, (HMENU)IDC_PORT, hInst, NULL);
+                               170, 10, 60, 24, ctx.hwnd, (HMENU)IDC_PORT, hInst, NULL);
+    
+    CreateWindowEx(0, "STATIC", "Threads:",
+                   WS_CHILD | WS_VISIBLE | SS_LEFT,
+                   240, 13, 50, 16, ctx.hwnd, NULL, hInst, NULL);
+    ctx.hThreads = CreateWindowEx(WS_EX_CLIENTEDGE, "EDIT", "10",
+                                  WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL | ES_NUMBER,
+                                  295, 10, 50, 24, ctx.hwnd, (HMENU)IDC_THREADS, hInst, NULL);
 
     ctx.hStart = CreateWindowEx(0, "BUTTON", "Start",
                                 WS_CHILD | WS_VISIBLE,
-                                310, 10, 80, 24, ctx.hwnd, (HMENU)IDC_START, hInst, NULL);
+                                355, 10, 70, 24, ctx.hwnd, (HMENU)IDC_START, hInst, NULL);
     ctx.hStop = CreateWindowEx(0, "BUTTON", "Stop",
                                WS_CHILD | WS_VISIBLE,
-                               400, 10, 80, 24, ctx.hwnd, (HMENU)IDC_STOP, hInst, NULL);
+                               435, 10, 70, 24, ctx.hwnd, (HMENU)IDC_STOP, hInst, NULL);
 
     ctx.hStatus = CreateWindowEx(0, "STATIC", "Receiver: stopped",
                                  WS_CHILD | WS_VISIBLE | SS_LEFT,
@@ -702,21 +736,20 @@ int main(int argc, char** argv) {
     ctx.hStats = CreateWindowEx(0, "STATIC", "",
                                 WS_CHILD | WS_VISIBLE | SS_LEFT,
                                 10, 66, 480, 60, ctx.hwnd, (HMENU)IDC_STATS, hInst, NULL);
-    ctx.hProgress = CreateWindowEx(0, PROGRESS_CLASS, NULL,
-                                   WS_CHILD | WS_VISIBLE,
-                                   10, 130, 480, 20, ctx.hwnd, (HMENU)IDC_PROGRESS, hInst, NULL);
     
     CreateWindowEx(0, "STATIC", "Buffer Progress:",
                    WS_CHILD | WS_VISIBLE | SS_LEFT,
-                   10, 155, 200, 16, ctx.hwnd, NULL, hInst, NULL);
-    
-    ctx.hSaveProgress = CreateWindowEx(0, PROGRESS_CLASS, NULL,
-                                       WS_CHILD | WS_VISIBLE,
-                                       10, 175, 480, 20, ctx.hwnd, (HMENU)IDC_SAVE_PROGRESS, hInst, NULL);
+                   10, 130, 200, 16, ctx.hwnd, NULL, hInst, NULL);
+    ctx.hProgress = CreateWindowEx(0, PROGRESS_CLASS, NULL,
+                                   WS_CHILD | WS_VISIBLE,
+                                   10, 150, 480, 20, ctx.hwnd, (HMENU)IDC_PROGRESS, hInst, NULL);
     
     CreateWindowEx(0, "STATIC", "Save Progress:",
                    WS_CHILD | WS_VISIBLE | SS_LEFT,
-                   10, 200, 200, 16, ctx.hwnd, NULL, hInst, NULL);
+                   10, 175, 200, 16, ctx.hwnd, NULL, hInst, NULL);
+    ctx.hSaveProgress = CreateWindowEx(0, PROGRESS_CLASS, NULL,
+                                       WS_CHILD | WS_VISIBLE,
+                                       10, 195, 480, 20, ctx.hwnd, (HMENU)IDC_SAVE_PROGRESS, hInst, NULL);
     
     ctx.hNetStats = CreateWindowEx(0, "STATIC", "",
                                     WS_CHILD | WS_VISIBLE | SS_LEFT,
