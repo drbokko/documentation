@@ -139,11 +139,13 @@ add_executable(stream2_bifurcator stream2_bifurcator.c)
 target_link_libraries(stream2_bifurcator stream2_helpers)
 
 if(WIN32)
-    add_executable(stream2_buffer_tiff_ui_win stream2_buffer_tiff_ui_win.c)
-    target_link_libraries(stream2_buffer_tiff_ui_win
+    add_executable(DectrisStream2Demo_windows DectrisStream2Demo_windows.c)
+    target_link_libraries(DectrisStream2Demo_windows
         stream2_helpers
         user32
         gdi32
         comctl32
+        iphlpapi
+        ws2_32
     )
 endif()
