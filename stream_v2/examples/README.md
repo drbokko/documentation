@@ -109,7 +109,7 @@ cmake --build .
 
 ```
 $vs="C:\Program Files\Microsoft Visual Studio\18\Community"
-& "$vs\Common7\Tools\Launch-VsDevShell.ps1" -Arch amd64 -HostArch amd64
+& "$vs\Common7\Tools\Launch-VsDevShell.ps1" -Arch x86 -HostArch x86
 cd documentation\stream_v2\examples
 cmake . -DCMAKE_BUILD_TYPE=Debug -DBUILD_LIBZMQ=YES
 cmake --build .
