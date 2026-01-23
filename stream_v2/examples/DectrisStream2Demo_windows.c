@@ -9,7 +9,7 @@
  *  - shows the same stats you'd see on the terminal
  *  - displays a RAM usage progress bar
  *  - keeps receiving while saving TIFFs (spawned worker threads)
- *  - lets you save TIFFs (same format as stream2_buffer_tiff) and free RAM
+ *  - lets you save TIFFs (same format as DectrisStream2Receiver_linux) and free RAM
  *  - exit button
  */
 

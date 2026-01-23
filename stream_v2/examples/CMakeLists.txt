@@ -120,9 +120,6 @@ target_link_libraries(stream2_helpers PUBLIC
 add_executable(example example.c)
 target_link_libraries(example stream2_helpers)
 
-add_executable(stream2_writer_single_threaded stream2_writer_single_threaded.c)
-target_link_libraries(stream2_writer_single_threaded stream2_helpers)
-
 add_executable(check_stream2 check_stream2.c)
 target_link_libraries(check_stream2 stream2_helpers)
 
@@ -132,8 +129,8 @@ target_link_libraries(stream2_buffer stream2_helpers)
 add_executable(stream2_buffer_decode stream2_buffer_decode.c)
 target_link_libraries(stream2_buffer_decode stream2_helpers)
 
-add_executable(stream2_buffer_tiff stream2_buffer_tiff.c)
-target_link_libraries(stream2_buffer_tiff stream2_helpers)
+add_executable(DectrisStream2Receiver_linux DectrisStream2Receiver_linux.c)
+target_link_libraries(DectrisStream2Receiver_linux stream2_helpers)
 
 add_executable(stream2_bifurcator stream2_bifurcator.c)
 target_link_libraries(stream2_bifurcator stream2_helpers)

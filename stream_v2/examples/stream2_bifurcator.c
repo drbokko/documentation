@@ -537,7 +537,7 @@ int main(int argc, char** argv) {
                         fprintf(stderr,
                                 "\nWarning: PUSH socket cannot send - "
                                 "no PULL sockets connected or send buffer full!\n"
-                                "Make sure downstream clients (e.g., stream2_buffer_tiff) "
+                                "Make sure downstream clients (e.g., DectrisStream2Receiver_linux) "
                                 "are connected with ZMQ_PULL sockets.\n");
                         warned_no_receivers = 1;
                     }
@@ -560,7 +560,7 @@ int main(int argc, char** argv) {
                         fprintf(stderr,
                                 "\nWarning: PUSH socket cannot send - "
                                 "no PULL sockets connected or send buffer full!\n"
-                                "Make sure downstream clients (e.g., stream2_buffer_tiff) "
+                                "Make sure downstream clients (e.g., DectrisStream2Receiver_linux) "
                                 "are connected with ZMQ_PULL sockets.\n");
                         warned_no_receivers = 1;
                     }

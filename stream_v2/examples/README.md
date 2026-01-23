@@ -26,8 +26,7 @@ The examples use a shared helper library (`stream2_helpers`) that provides commo
 | `check_stream2` | Simple stream checker that counts images and total bytes received. Minimal overhead. |
 | `stream2_buffer` | Receives stream data over ZMQ and buffers images in memory (up to a configurable limit). Reports throughput statistics. Uses zero-copy where possible. Does **not** decompress or save files. |
 | `stream2_buffer_decode` | Like `stream2_buffer`, but also decompresses the image data and reports compression statistics (ratio, compressed vs decompressed bytes). Does **not** save files. |
-| `stream2_buffer_tiff` | Like `stream2_buffer_decode`, but writes buffered images to TIFF files on disk using **multi-threaded** parallel writing. Thread count configurable via `STREAM2_TIFF_THREADS` env var. |
-| `stream2_writer_single_threaded` | Simpler **single-threaded** TIFF writer. Receives stream data, buffers images, prints first image metadata, and writes TIFF files sequentially. |
+| `DectrisStream2Receiver_linux` | Like `stream2_buffer_decode`, but writes buffered images to TIFF files on disk using **multi-threaded** parallel writing. Thread count configurable via `--threads` command-line option (default: 10). |
 | `stream2_bifurcator` | **Stream relay/forwarder** for dual-NIC setups. Receives on one interface, buffers in RAM, and re-broadcasts raw messages on another interface without modification. |
 
 All buffer-based programs support the `STREAM2_BUFFER_GB` environment variable to set the memory buffer limit (default: 20 GB).
@@ -42,7 +41,7 @@ The bifurcator is designed for machines with two fast network interfaces, acting
 ./stream2_bifurcator 192.168.1.100 192.168.2.1 31002
 ```
 
-Downstream clients should connect using ZMQ_PULL sockets (matching the Stream V2 protocol). Compatible with all Stream V2 client programs like `stream2_buffer_tiff`, `stream2_buffer`, etc. The bifurcator uses PUSH sockets with a timeout, so if receivers can't keep up, sends will timeout (but messages are still buffered locally).
+Downstream clients should connect using ZMQ_PULL sockets (matching the Stream V2 protocol). Compatible with all Stream V2 client programs like `DectrisStream2Receiver_linux`, `stream2_buffer`, etc. The bifurcator uses PUSH sockets with a timeout, so if receivers can't keep up, sends will timeout (but messages are still buffered locally).
 
 #### Performance Tuning for ConnectX-6/7 NICs
 

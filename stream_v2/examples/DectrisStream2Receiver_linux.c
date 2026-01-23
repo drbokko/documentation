@@ -1,9 +1,9 @@
 /*
- * stream2_buffer_tiff.c - Multi-threaded TIFF writer
+ * DectrisStream2Receiver_linux.c - Multi-threaded TIFF writer
  *
  * Like stream2_buffer_decode, but writes buffered images to TIFF files on disk
  * using multi-threaded parallel writing. Thread count configurable via
- * STREAM2_TIFF_THREADS environment variable.
+ * command-line option (default 10).
  */
 #include "stream2_common.h"
 #include "stream2_image_buffer.h"
@@ -15,6 +15,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <inttypes.h>
+#include <errno.h>
 
 #ifndef _WIN32
 #include <sys/types.h>
@@ -203,20 +204,51 @@ static enum stream2_result parse_msg(const uint8_t* msg_data,
 }
 
 int main(int argc, char** argv) {
-    if (argc != 2) {
-        fprintf(stderr, "usage: %s HOST\n", argv[0]);
+    int num_threads = 10;  /* default thread count */
+    const char* host = NULL;
+
+    /* Parse command-line arguments */
+    if (argc < 2 || argc > 4) {
+        fprintf(stderr, "usage: %s HOST [--threads N]\n", argv[0]);
+        fprintf(stderr, "  HOST: target host address\n");
+        fprintf(stderr, "  --threads N: number of threads for receiver (default: 10)\n");
         return EXIT_FAILURE;
     }
 
+    host = argv[1];
+
+    /* Parse optional thread count */
+    for (int i = 2; i < argc; i++) {
+        if (strcmp(argv[i], "--threads") == 0) {
+            if (i + 1 < argc) {
+                char* endp = NULL;
+                long t = strtol(argv[i + 1], &endp, 10);
+                if (endp && *endp == '\0' && t > 0 && t <= 255) {
+                    num_threads = (int)t;
+                    i++; /* skip the number */
+                } else {
+                    fprintf(stderr, "error: invalid thread count '%s'\n", argv[i + 1]);
+                    return EXIT_FAILURE;
+                }
+            } else {
+                fprintf(stderr, "error: --threads requires a number\n");
+                return EXIT_FAILURE;
+            }
+        } else {
+            fprintf(stderr, "error: unknown option '%s'\n", argv[i]);
+            return EXIT_FAILURE;
+        }
+    }
+
     char address[100];
-    sprintf(address, "tcp://%s:31001", argv[1]);
+    sprintf(address, "tcp://%s:31001", host);
 
 #ifndef _WIN32
     char iface[64] = {0};
     const char* env_iface = getenv("STREAM2_NET_IFACE");
     if (env_iface && *env_iface) {
         strncpy(iface, env_iface, sizeof(iface) - 1);
-    } else if (select_iface_for_host(argv[1], iface, sizeof(iface)) != 0 &&
+    } else if (select_iface_for_host(host, iface, sizeof(iface)) != 0 &&
                pick_default_iface(iface, sizeof(iface)) != 0) {
         fprintf(stderr, "warn: could not auto-detect network interface\n");
     }
@@ -292,17 +324,20 @@ int main(int argc, char** argv) {
 
 #ifndef _WIN32
     stream2_stats_report(&s, &buf, 1);
-    stream2_flush_buffer_to_tiff_mt(&buf, 10);
+    stream2_flush_buffer_to_tiff_mt(&buf, num_threads);
     if (have_iface_stats) {
         if (read_iface_stats(iface, &net_end) == 0) {
             fprintf(stderr,
                     "net iface %s end:   rx_drop=%" PRIu64 " rx_err=%" PRIu64
                     " rx_frame=%" PRIu64 " tx_drop=%" PRIu64 " tx_err=%" PRIu64
-                    " (delta rx_drop=%" PRIu64 " rx_err=%" PRIu64
-                    " rx_frame=%" PRIu64 " tx_drop=%" PRIu64
-                    " tx_err=%" PRIu64 ")\n",
+                    "\n",
                     iface, net_end.rx_drop, net_end.rx_errs, net_end.rx_frame,
-                    net_end.tx_drop, net_end.tx_errs,
+                    net_end.tx_drop, net_end.tx_errs);
+            fprintf(stderr,
+                    "net iface %s delta: rx_drop=%" PRIu64 " rx_err=%" PRIu64
+                    " rx_frame=%" PRIu64 " tx_drop=%" PRIu64 " tx_err=%" PRIu64
+                    "\n",
+                    iface,
                     net_end.rx_drop - net_start.rx_drop,
                     net_end.rx_errs - net_start.rx_errs,
                     net_end.rx_frame - net_start.rx_frame,
@@ -315,12 +350,11 @@ int main(int argc, char** argv) {
     }
 #else
     stream2_stats_report(&s, &buf, 1);
-    stream2_flush_buffer_to_tiff_mt(&buf, 10);
+    stream2_flush_buffer_to_tiff_mt(&buf, num_threads);
 #endif
     zmq_msg_close(&msg);
     zmq_close(socket);
     zmq_ctx_term(ctx);
     stream2_buffer_free(&buf);
-    return EXIT_FAILURE;
+    return EXIT_SUCCESS;
 }
-
