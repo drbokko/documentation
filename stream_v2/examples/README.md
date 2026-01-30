@@ -125,11 +125,91 @@ cmake --build . --target clean-build
 
 ## Python
 
+### Stream V2 Client
+
 `client.py` demonstrates how to receive and decode stream V2 data using Python 3. Fields of type `MultiDimArray` and `TypedArray` are represented as `numpy` arrays.
 
 ```sh
 pip install cbor2 dectris-compression~=0.3.0 numpy pyzmq
 python client.py
+```
+
+### TIFF Viewer
+
+Two versions are available for viewing TIFF images saved by `stream2_buffer_tiff` or `stream2_bifurcator`:
+
+#### Option 1: Tkinter Version (Recommended - No PyQt5 required)
+
+`stream2_tiff_viewer_tk.py` uses tkinter (comes with Python) and matplotlib. No PyQt5 installation needed.
+
+**Installation:**
+```sh
+pip install numpy pillow matplotlib
+python stream2_tiff_viewer_tk.py
+```
+
+#### Option 2: PyQt5 Version (Better UI)
+
+`stream2_tiff_viewer.py` uses PyQt5 for a more polished interface.
+
+**Installation:**
+```sh
+# Try PyQt5 first
+pip install PyQt5 numpy pillow
+
+# If PyQt5 fails, try PyQt6
+pip install PyQt6 numpy pillow
+
+# Or use system package manager (Linux)
+sudo apt-get install python3-pyqt5 python3-numpy python3-pil  # Ubuntu/Debian
+sudo dnf install python3-qt5 python3-numpy python3-pillow      # Fedora/RHEL
+```
+
+**PyQt5 Installation Troubleshooting:**
+
+If `pip install PyQt5` fails, try:
+1. **Install system dependencies first (Linux):**
+   ```sh
+   sudo apt-get install python3-pyqt5  # Ubuntu/Debian
+   sudo dnf install python3-qt5        # Fedora/RHEL
+   ```
+
+2. **Use pre-built wheels:**
+   ```sh
+   pip install --only-binary :all: PyQt5
+   ```
+
+3. **Skip optional dependencies:**
+   ```sh
+   pip install --no-deps PyQt5
+   ```
+
+4. **Use the tkinter version instead** (no PyQt5 needed)
+
+**Features (both versions):**
+- 16-32 bit monochromatic TIFF support
+- Dynamic range adjustment (min/max value selection)
+- Histogram-based range selection (click/drag on histogram)
+- Multiple color palettes (Grayscale, Hot, Cool, Jet, Viridis)
+- Series navigation (previous/next, play/pause movie mode)
+- Metadata display (image_id, series_id, channel, start_time)
+
+**Usage:**
+1. Run either viewer script
+2. Click "Open Series Directory"
+3. Select a directory containing TIFF files (e.g., `/dev/shm/serie_000001/`)
+
+**Note:** To display `start_time` metadata, you need to save metadata separately. The viewer will look for a `metadata.json` file in the series directory with the following format:
+```json
+{
+  "series_id": 1,
+  "channel": "data",
+  "start_times": {
+    "1": 0.0,
+    "2": 0.1,
+    ...
+  }
+}
 ```
 
 [dectris-compression]: https://github.com/dectris/compression
