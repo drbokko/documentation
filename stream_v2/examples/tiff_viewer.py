@@ -15,6 +15,7 @@ import sys
 import os
 import glob
 import re
+import signal
 from pathlib import Path
 from typing import Optional, List, Tuple
 import numpy as np
@@ -949,7 +950,8 @@ class TIFFViewer(QMainWindow):
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to load image: {e}")
     
-    def load_image(self, index: int):
+    def load_image(self, index: int, fast_mode: bool = False):
+        """Load image at index. fast_mode=True skips expensive operations for playback."""
         if self.series is None or index < 0 or index >= len(self.series):
             return
         
@@ -959,73 +961,83 @@ class TIFFViewer(QMainWindow):
         if self.current_image is None:
             return
         
-        # Update metadata
-        image_id = self.series.get_image_id(index)
-        start_time = self.series.get_start_time(index)
-        
-        meta_text = f"Image ID: {image_id}\n"
-        meta_text += f"Series ID: {self.series.series_id}\n"
-        meta_text += f"Channel: {self.series.channel}\n"
-        meta_text += f"Index: {index + 1} / {len(self.series)}\n"
-        if start_time is not None:
-            meta_text += f"Start Time: {start_time:.6f} s\n"
-        meta_text += f"Shape: {self.current_image.shape}\n"
-        meta_text += f"Data Type: {self.current_image.dtype}\n"
-        meta_text += f"Min: {np.min(self.current_image):.2f}\n"
-        meta_text += f"Max: {np.max(self.current_image):.2f}\n"
-        self.meta_label.setText(meta_text)
-        
-        # Update histogram (preserve existing range when changing images)
-        # Check if we have a valid range set (not just default values)
-        preserve_range = (hasattr(self, 'min_val') and hasattr(self, 'max_val') and 
-                         self.min_val != self.max_val and
-                         not (self.min_val == 0.0 and self.max_val == 1.0))
-        
-        if preserve_range:
-            # Sync the viewer's range to histogram before updating
-            self.histogram.selected_min = self.min_val
-            self.histogram.selected_max = self.max_val
-        
-        self.histogram.set_histogram(self.current_image, preserve_range=preserve_range)
-        
-        # Sync histogram range back to viewer
-        if preserve_range:
-            self.min_val = self.histogram.selected_min
-            self.max_val = self.histogram.selected_max
-            self.min_spin.setValue(self.min_val)
-            self.max_spin.setValue(self.max_val)
-        
-        # Update timeline
-        if self.series:
-            self.timeline.set_current_frame(index)
-            # Update timeline start times if available (only load once, cache it)
-            if not hasattr(self, '_cached_start_times') or self._cached_start_times is None:
-                # Load start times once and cache them
-                if hasattr(self.series, 'metadata') and hasattr(self.series.metadata, 'start_times'):
-                    start_times = {}
-                    for i in range(len(self.series)):
-                        start_time = self.series.get_start_time(i)
-                        if start_time is not None:
-                            start_times[i] = start_time
-                    if start_times:
-                        self._cached_start_times = start_times
-                        self.timeline.start_times = start_times
-                        self.timeline.update()
+        # Skip expensive operations during fast playback
+        if not fast_mode:
+            # Update metadata
+            image_id = self.series.get_image_id(index)
+            start_time = self.series.get_start_time(index)
+            
+            meta_text = f"Image ID: {image_id}\n"
+            meta_text += f"Series ID: {self.series.series_id}\n"
+            meta_text += f"Channel: {self.series.channel}\n"
+            meta_text += f"Index: {index + 1} / {len(self.series)}\n"
+            if start_time is not None:
+                meta_text += f"Start Time: {start_time:.6f} s\n"
+            meta_text += f"Shape: {self.current_image.shape}\n"
+            meta_text += f"Data Type: {self.current_image.dtype}\n"
+            meta_text += f"Min: {np.min(self.current_image):.2f}\n"
+            meta_text += f"Max: {np.max(self.current_image):.2f}\n"
+            self.meta_label.setText(meta_text)
+            
+            # Update histogram (preserve existing range when changing images)
+            # Check if we have a valid range set (not just default values)
+            preserve_range = (hasattr(self, 'min_val') and hasattr(self, 'max_val') and 
+                             self.min_val != self.max_val and
+                             not (self.min_val == 0.0 and self.max_val == 1.0))
+            
+            if preserve_range:
+                # Sync the viewer's range to histogram before updating
+                self.histogram.selected_min = self.min_val
+                self.histogram.selected_max = self.max_val
+            
+            self.histogram.set_histogram(self.current_image, preserve_range=preserve_range)
+            
+            # Sync histogram range back to viewer
+            if preserve_range:
+                self.min_val = self.histogram.selected_min
+                self.max_val = self.histogram.selected_max
+                self.min_spin.setValue(self.min_val)
+                self.max_spin.setValue(self.max_val)
+            
+            # Update timeline
+            if self.series:
+                self.timeline.set_current_frame(index)
+                # Update timeline start times if available (only load once, cache it)
+                if not hasattr(self, '_cached_start_times') or self._cached_start_times is None:
+                    # Load start times once and cache them
+                    if hasattr(self.series, 'metadata') and hasattr(self.series.metadata, 'start_times'):
+                        start_times = {}
+                        for i in range(len(self.series)):
+                            start_time = self.series.get_start_time(i)
+                            if start_time is not None:
+                                start_times[i] = start_time
+                        if start_times:
+                            self._cached_start_times = start_times
+                            self.timeline.start_times = start_times
+                            self.timeline.update()
+                        else:
+                            self._cached_start_times = {}
                     else:
                         self._cached_start_times = {}
                 else:
-                    self._cached_start_times = {}
+                    # Use cached start times
+                    self.timeline.start_times = self._cached_start_times
+                    self.timeline.update()
+            
+            # Only auto-range on first image load, not when navigating
+            if not preserve_range:
+                self.auto_range()
             else:
-                # Use cached start times
-                self.timeline.start_times = self._cached_start_times
-                self.timeline.update()
-        
-        # Only auto-range on first image load, not when navigating
-        if not preserve_range:
-            self.auto_range()
+                # Update display with preserved range
+                self.update_display()
         else:
+            # Fast mode: only update display and timeline position
+            if self.series:
+                self.timeline.set_current_frame(index)
             # Update display with preserved range
             self.update_display()
+            # Process events to keep UI responsive
+            QApplication.processEvents()
     
     def auto_range(self):
         if self.current_image is None:
@@ -1128,7 +1140,8 @@ class TIFFViewer(QMainWindow):
         if self.series and self.current_index < len(self.series) - 1:
             self.current_index += 1
             self.index_spin.setValue(self.current_index)
-            self.load_image(self.current_index)
+            # Use fast mode during playback to skip expensive operations
+            self.load_image(self.current_index, fast_mode=self.playing)
         else:
             self.toggle_play()  # Stop at end
     
@@ -1144,6 +1157,9 @@ class TIFFViewer(QMainWindow):
         else:
             self.play_btn.setText("▶ Play")
             self.play_timer.stop()
+            # Refresh current frame with full metadata when stopping
+            if self.current_image is not None:
+                self.load_image(self.current_index, fast_mode=False)
     
     def update_playback_speed(self, value: int):
         """Update playback speed from slider"""
@@ -1201,6 +1217,14 @@ class TIFFViewer(QMainWindow):
 
 def main():
     app = QApplication(sys.argv)
+    
+    # Handle Control-C gracefully
+    def signal_handler(signum, frame):
+        """Handle SIGINT (Control-C) by quitting the application"""
+        app.quit()
+    
+    signal.signal(signal.SIGINT, signal_handler)
+    
     viewer = TIFFViewer()
     viewer.show()
     # PyQt6 uses exec(), PyQt5 uses exec_()
