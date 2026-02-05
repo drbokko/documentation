@@ -18,3 +18,4 @@ example
 *.a
 bin/
 lib/
+*__pycache__/
