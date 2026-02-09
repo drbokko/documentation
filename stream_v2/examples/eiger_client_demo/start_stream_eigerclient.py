@@ -38,7 +38,7 @@ if __name__ == '__main__':
     ################
     configuration = {
         # Detector IP and Initialization
-        "DCU_IP": 'dev-si-e2dcu-01',  # IP of the detector control unit
+        "DCU_IP": '172.31.1.1',  # IP of the detector control unit
         "force_initialization": False,  # Force initialization if needed
 
         # File & Naming Settings
@@ -49,9 +49,9 @@ if __name__ == '__main__':
         # "acquisition_time": "20250430_120924", #  for some manual download of specific h5 files
 
         # Data acquisition parameters
-        "thresholds": [13000, 30000],  # Energy thresholds [eV], insert 1 or 2 values
-        "number_of_images": 10,  # Number of images to capture
-        "exposure_time": 1/10,  # Exposure time per image [s]
+        "thresholds": [10000],  # Energy thresholds [eV], insert 1 or 2 values
+        "number_of_images": 1000,  # Number of images to capture
+        "exposure_time": 1/500,  # Exposure time per image [s]
         "sleep_time": 0.0,  # Delay between frames [s]
         
         # Data Acquisition Interfaces
@@ -62,7 +62,7 @@ if __name__ == '__main__':
         "nimages_per_file": 100,  # Max images per HDF5 file
         
         # Flatfield Correction Settings
-        "use_custom_flatfield": True,  # Enable custom flatfield correction
+        "use_custom_flatfield": False,  # Enable custom flatfield correction
         "flatfield_file": None,  # Path to .npy file (if None, will create example flatfield)
         # Example: "flatfield_file": "/path/to/your/flatfield_correction.npy",
         "flatfield_save_reference": True,  # Save the flatfield array for reference
@@ -95,8 +95,8 @@ if __name__ == '__main__':
     c.setDetectorConfig('counting_mode', 'normal')
     c.setDetectorConfig('virtual_pixel_correction_applied', True)
     c.setDetectorConfig('mask_to_zero', True) #pixels marked in the pixel_mask will be set to zero
-    c.setDetectorConfig("test_image_mode", "value")
-    c.setDetectorConfig("test_image_value", 100)
+    c.setDetectorConfig("test_image_mode", "")
+    # c.setDetectorConfig("test_image_value", 100)
     logging.debug("Basic detector configuration complete")
       # Handle Custom Flatfield Correction
     if configuration["use_custom_flatfield"]:
