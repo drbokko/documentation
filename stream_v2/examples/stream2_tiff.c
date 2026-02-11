@@ -8,6 +8,7 @@
 #include "stream2_tiff.h"
 #include "compression/src/compression.h"
 #include <errno.h>
+#include <string.h>
 
 #ifndef _WIN32
 #include <sys/statvfs.h>
@@ -22,6 +23,9 @@
 #define STREAM2_TIFF_THREADS_SUPPORTED 1
 #define STREAM2_TIFF_THREADS_WIN 1
 #endif
+
+/* Custom output path (NULL means use default) */
+static char g_output_path[512] = {0};
 
 static uint16_t sample_format_for_tag(enum stream2_typed_array_tag tag) {
     switch (tag) {
@@ -230,18 +234,45 @@ io_fail:
     return -1;
 }
 
+void stream2_set_output_path(const char* path) {
+    if (path && path[0] != '\0') {
+        size_t len = strlen(path);
+        strncpy(g_output_path, path, sizeof(g_output_path) - 1);
+        g_output_path[sizeof(g_output_path) - 1] = '\0';
+        
+        /* Remove trailing slashes/backslashes */
+        len = strlen(g_output_path);
+        while (len > 0 && (g_output_path[len - 1] == '/' || g_output_path[len - 1] == '\\')) {
+            g_output_path[len - 1] = '\0';
+            len--;
+        }
+    } else {
+        g_output_path[0] = '\0';
+    }
+}
+
 void stream2_format_tiff_path(char* dst,
                               size_t dst_size,
                               const char* channel,
                               uint64_t image_id,
                               uint64_t series_id) {
-    const char* base = "/dev/shm";
+    const char* base;
     char series_dir[256];
     char full_path[512];
     
+    /* Use custom path if set, otherwise use default */
+    if (g_output_path[0] != '\0') {
+        base = g_output_path;
+    } else {
 #ifdef _WIN32
-    base = "Z:/";
-    snprintf(series_dir, sizeof(series_dir), "%sserie_%06" PRIu64, base, series_id);
+        base = "Z:/";
+#else
+        base = "/dev/shm";
+#endif
+    }
+    
+#ifdef _WIN32
+    snprintf(series_dir, sizeof(series_dir), "%s\\serie_%06" PRIu64, base, series_id);
     snprintf(full_path, sizeof(full_path), "%s\\stream2_%s_%06" PRIu64 ".tiff",
              series_dir, channel ? channel : "data", image_id);
 #else
@@ -249,6 +280,18 @@ void stream2_format_tiff_path(char* dst,
     snprintf(full_path, sizeof(full_path), "%s/stream2_%s_%06" PRIu64 ".tiff",
              series_dir, channel ? channel : "data", image_id);
 #endif
+    
+    /* Create base directory if it doesn't exist (for custom paths) */
+    if (g_output_path[0] != '\0') {
+#ifdef _WIN32
+        _mkdir(base);
+#else
+        struct stat st = {0};
+        if (stat(base, &st) == -1) {
+            mkdir(base, 0755);
+        }
+#endif
+    }
     
     /* Create series directory if it doesn't exist */
 #ifdef _WIN32

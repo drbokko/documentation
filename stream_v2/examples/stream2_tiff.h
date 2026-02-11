@@ -10,6 +10,9 @@
 int stream2_write_tiff(const char* path,
                        const struct stream2_buffered_image* img);
 
+/* Set custom output path for TIFF files (NULL or empty string to use default) */
+void stream2_set_output_path(const char* path);
+
 /* Format a TIFF filename for an image (creates series folder if needed) */
 void stream2_format_tiff_path(char* dst,
                               size_t dst_size,

@@ -23,6 +23,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <iphlpapi.h>
+#include <shlobj.h>
 
 #include "stream2.h"
 #include "stream2_common.h"
@@ -33,6 +34,7 @@
 
 #pragma comment(lib, "iphlpapi.lib")
 #pragma comment(lib, "ws2_32.lib")
+#pragma comment(lib, "shell32.lib")
 
 #define IDC_IP       1000
 #define IDC_PORT     1001
@@ -47,6 +49,9 @@
 #define IDC_FLUSH    1010
 #define IDC_SAVE_PROGRESS 1011
 #define IDC_NET_STATS 1012
+#define IDC_OUTPUT_FOLDER 1013
+#define IDC_BROWSE_FOLDER 1014
+#define IDC_AUTOSAVE 1015
 #define WM_APP_SAVE_DONE    (WM_APP + 1)
 #define WM_APP_RECV_STATE   (WM_APP + 2)
 #define WM_APP_SAVE_PROGRESS (WM_APP + 3)
@@ -78,8 +83,13 @@ struct app_ctx {
     HWND hFlush;
     HWND hSaveProgress;
     HWND hNetStats;
+    HWND hOutputFolder;
+    HWND hBrowseFolder;
+    HWND hAutosave;
 
     volatile LONG saving;
+    volatile LONG autosave_enabled;
+    volatile LONG64 last_autosaved_index;
     volatile LONG receiving;
     volatile LONG recv_stop;
     volatile LONG64 save_done;
@@ -297,6 +307,76 @@ static void safe_buffer_reset(struct stream2_buffer_ctx* buf) {
     buf->warned_limit = 0;
 }
 
+static void autosave_images(struct app_ctx* ctx) {
+    if (!InterlockedCompareExchange(&ctx->autosave_enabled, 0, 0)) {
+        return; /* Autosave disabled */
+    }
+    
+    if (InterlockedCompareExchange(&ctx->saving, 0, 0)) {
+        return; /* Manual save in progress, skip autosave */
+    }
+    
+    /* Get output folder from UI */
+    char output_folder[512] = {0};
+    GetWindowText(ctx->hOutputFolder, output_folder, sizeof(output_folder));
+    stream2_set_output_path(output_folder);
+    
+    EnterCriticalSection(&ctx->buf_cs);
+    size_t current_len = ctx->buf.len;
+    LONG64 last_saved = InterlockedCompareExchange64(&ctx->last_autosaved_index, 0, 0);
+    size_t start_idx = (size_t)last_saved;
+    
+    if (start_idx >= current_len) {
+        LeaveCriticalSection(&ctx->buf_cs);
+        return; /* No new images to save */
+    }
+    
+    /* Save new images (from start_idx to current_len) */
+    for (size_t i = start_idx; i < current_len; i++) {
+        if (i >= ctx->buf.len) {
+            break; /* Buffer changed during save */
+        }
+        /* Write the image directly from buffer */
+        uint64_t cbytes = 0, dbytes = 0;
+        stream2_write_one_image(&ctx->buf, i, &cbytes, &dbytes);
+    }
+    
+    /* Update last saved index */
+    InterlockedExchange64(&ctx->last_autosaved_index, (LONG64)current_len);
+    LeaveCriticalSection(&ctx->buf_cs);
+}
+
+static int browse_for_folder(HWND hwnd, char* path, size_t path_size) {
+    BROWSEINFO bi = {0};
+    bi.hwndOwner = hwnd;
+    bi.lpszTitle = "Select Output Folder";
+    bi.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
+    
+    /* Set initial directory if path is provided */
+    if (path && path[0] != '\0') {
+        LPITEMIDLIST pidl = ILCreateFromPathA(path);
+        if (pidl) {
+            bi.pidlRoot = pidl;
+        }
+    }
+    
+    LPITEMIDLIST pidl = SHBrowseForFolder(&bi);
+    
+    /* Clean up initial directory if set */
+    if (bi.pidlRoot) {
+        ILFree((LPITEMIDLIST)bi.pidlRoot);
+    }
+    
+    if (pidl) {
+        if (SHGetPathFromIDListA(pidl, path)) {
+            ILFree(pidl);
+            return 0; /* Success */
+        }
+        ILFree(pidl);
+    }
+    return -1; /* User cancelled or error */
+}
+
 /* Multi-threaded save with progress reporting */
 struct save_write_ctx {
     struct stream2_buffer_ctx* buf;
@@ -329,6 +409,11 @@ static DWORD WINAPI save_writer_thread(LPVOID arg) {
 
 static DWORD WINAPI save_thread(LPVOID param) {
     struct app_ctx* ctx = (struct app_ctx*)param;
+
+    /* Get output folder from UI */
+    char output_folder[512] = {0};
+    GetWindowText(ctx->hOutputFolder, output_folder, sizeof(output_folder));
+    stream2_set_output_path(output_folder);
 
     struct stream2_buffer_ctx snapshot = {0};
     EnterCriticalSection(&ctx->buf_cs);
@@ -521,6 +606,27 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             LeaveCriticalSection(&ctx->buf_cs);
             break;
         }
+        case IDC_BROWSE_FOLDER: {
+            char folder_path[MAX_PATH] = {0};
+            char current_path[MAX_PATH] = {0};
+            GetWindowText(ctx->hOutputFolder, current_path, sizeof(current_path));
+            if (current_path[0] != '\0') {
+                strncpy(folder_path, current_path, sizeof(folder_path) - 1);
+            }
+            if (browse_for_folder(hwnd, folder_path, sizeof(folder_path)) == 0) {
+                SetWindowText(ctx->hOutputFolder, folder_path);
+            }
+            break;
+        }
+        case IDC_AUTOSAVE: {
+            LRESULT checked = SendMessage(ctx->hAutosave, BM_GETCHECK, 0, 0);
+            InterlockedExchange(&ctx->autosave_enabled, (checked == BST_CHECKED) ? 1 : 0);
+            if (checked == BST_CHECKED) {
+                /* Reset autosave index when enabling */
+                InterlockedExchange64(&ctx->last_autosaved_index, 0);
+            }
+            break;
+        }
         case IDC_START: {
             if (InterlockedCompareExchange(&ctx->receiving, 0, 0)) break; /* already running */
             char ip[128] = {0};
@@ -580,6 +686,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 PostMessage(ctx->hwnd, WM_APP_RECV_STATE, 0, 0);
             } else {
                 InterlockedExchange(&ctx->receiving, 1);
+                /* Reset autosave index when starting acquisition */
+                InterlockedExchange64(&ctx->last_autosaved_index, 0);
                 PostMessage(ctx->hwnd, WM_APP_RECV_STATE, 1, 0);
             }
             break;
@@ -628,6 +736,12 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 read_net_stats(ctx->net_start.iface_index, &ctx->net_current);
                 LeaveCriticalSection(&ctx->net_cs);
             }
+            
+            /* Autosave images if enabled */
+            if (InterlockedCompareExchange(&ctx->autosave_enabled, 0, 0) &&
+                InterlockedCompareExchange(&ctx->receiving, 0, 0)) {
+                autosave_images(ctx);
+            }
         }
         break;
     case WM_APP_SAVE_DONE:
@@ -656,6 +770,9 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             SetWindowText(ctx->hStatus, buf);
         }
         break;
+    case WM_ERASEBKGND:
+        /* Let Windows handle background erasing to prevent black background */
+        return DefWindowProc(hwnd, msg, wParam, lParam);
     case WM_CLOSE:
         g_stop = 1;
         if (ctx && InterlockedCompareExchange(&ctx->receiving, 0, 0)) {
@@ -682,6 +799,8 @@ int main(int argc, char** argv) {
     stream2_stats_init(&ctx.stats);
     ctx.num_active_receivers = 0;
     ctx.num_receivers = DEFAULT_RECEIVERS;
+    ctx.autosave_enabled = 0;
+    ctx.last_autosaved_index = 0;
     for (int i = 0; i < MAX_RECEIVERS; i++) {
         ctx.hRecvThreads[i] = NULL;
     }
@@ -701,11 +820,12 @@ int main(int argc, char** argv) {
     wc.hInstance = hInst;
     wc.lpszClassName = "DectrisStream2DemoClass";
     wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+    wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
     RegisterClass(&wc);
 
     ctx.hwnd = CreateWindowEx(0, wc.lpszClassName, "DectrisStream2Demo_windows",
                               WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
-                              520, 400, NULL, NULL, hInst, NULL);
+                              520, 440, NULL, NULL, hInst, NULL);
     if (!ctx.hwnd) return EXIT_FAILURE;
     SetWindowLongPtr(ctx.hwnd, GWLP_USERDATA, (LONG_PTR)&ctx);
 
@@ -755,15 +875,29 @@ int main(int argc, char** argv) {
                                     WS_CHILD | WS_VISIBLE | SS_LEFT,
                                     10, 220, 480, 60, ctx.hwnd, (HMENU)IDC_NET_STATS, hInst, NULL);
     
+    CreateWindowEx(0, "STATIC", "Output Folder:",
+                   WS_CHILD | WS_VISIBLE | SS_LEFT,
+                   10, 288, 100, 16, ctx.hwnd, NULL, hInst, NULL);
+    ctx.hBrowseFolder = CreateWindowEx(0, "BUTTON", "Browse...",
+                                       WS_CHILD | WS_VISIBLE,
+                                       10, 308, 60, 24, ctx.hwnd, (HMENU)IDC_BROWSE_FOLDER, hInst, NULL);
+    ctx.hOutputFolder = CreateWindowEx(WS_EX_CLIENTEDGE, "EDIT", "",
+                                       WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL,
+                                       80, 308, 430, 24, ctx.hwnd, (HMENU)IDC_OUTPUT_FOLDER, hInst, NULL);
+    
+    ctx.hAutosave = CreateWindowEx(0, "BUTTON", "Autosave",
+                                    WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX,
+                                    10, 340, 120, 20, ctx.hwnd, (HMENU)IDC_AUTOSAVE, hInst, NULL);
+    
     ctx.hSave = CreateWindowEx(0, "BUTTON", "Save TIFFs",
                                WS_CHILD | WS_VISIBLE,
-                               10, 288, 120, 28, ctx.hwnd, (HMENU)IDC_SAVE, hInst, NULL);
+                               10, 368, 120, 28, ctx.hwnd, (HMENU)IDC_SAVE, hInst, NULL);
     ctx.hFlush = CreateWindowEx(0, "BUTTON", "Flush Buffer",
                                 WS_CHILD | WS_VISIBLE,
-                                140, 288, 120, 28, ctx.hwnd, (HMENU)IDC_FLUSH, hInst, NULL);
+                                140, 368, 120, 28, ctx.hwnd, (HMENU)IDC_FLUSH, hInst, NULL);
     ctx.hExit = CreateWindowEx(0, "BUTTON", "Exit",
                                WS_CHILD | WS_VISIBLE,
-                               270, 288, 80, 28, ctx.hwnd, (HMENU)IDC_EXIT, hInst, NULL);
+                               270, 368, 80, 28, ctx.hwnd, (HMENU)IDC_EXIT, hInst, NULL);
 
     ShowWindow(ctx.hwnd, SW_SHOWDEFAULT);
     UpdateWindow(ctx.hwnd);
