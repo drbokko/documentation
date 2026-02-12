@@ -115,13 +115,28 @@ cmake --build .
 ```
 
 To clean build artifacts:
-```
-# For Makefile generators (Linux/macOS):
+```bash
+# For Makefile generators (Linux/macOS) - removes object files and intermediate build files
 make clean
 
-# For all generators (including Windows/Visual Studio):
+# For all generators - Deep clean (removes binaries, PDB files, ILK files, 
+# intermediate files, CMake cache, and all build artifacts)
 cmake --build . --target clean-build
+
+# Standard clean (CMake built-in, removes build artifacts but keeps cache)
+cmake --build . --target clean
 ```
+
+**Note:** The `clean-build` target removes:
+- All executables (`.exe` files) and libraries (`.lib` files)
+- Debug symbol files (`.pdb` files on Windows)
+- Incremental linker files (`.ilk` files on Windows)
+- Object files (`.obj`/`.o` files)
+- CMake cache and generated files
+- Visual Studio project files (`.vcxproj.user`, `.vs` directory)
+- Fetched dependencies build directories (`_deps`)
+
+This provides a complete clean slate for rebuilding from scratch.
 
 ## Python
 

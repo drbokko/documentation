@@ -153,15 +153,23 @@ if(WIN32)
 endif()
 
 # Add clean-build target (works on all platforms, especially useful for Windows/Visual Studio)
+# Usage: cmake --build . --target clean-build
 # Note: For Makefile generators, 'make clean' already exists and works. This target
-# provides a way to clean everything including CMake cache files.
+# provides a way to clean everything including CMake cache files, binaries, and intermediate files.
 add_custom_target(clean-build
-    COMMAND ${CMAKE_COMMAND} -E remove_directory ${CMAKE_BINARY_DIR}/bin
-    COMMAND ${CMAKE_COMMAND} -E remove_directory ${CMAKE_BINARY_DIR}/lib
-    COMMAND ${CMAKE_COMMAND} -E remove ${CMAKE_BINARY_DIR}/CMakeCache.txt
-    COMMAND ${CMAKE_COMMAND} -E remove_directory ${CMAKE_BINARY_DIR}/CMakeFiles
-    COMMAND ${CMAKE_COMMAND} -E remove ${CMAKE_BINARY_DIR}/cmake_install.cmake
-    COMMAND ${CMAKE_COMMAND} -E remove ${CMAKE_BINARY_DIR}/Makefile
-    COMMAND ${CMAKE_COMMAND} -E remove ${CMAKE_BINARY_DIR}/compile_commands.json
-    COMMENT "Cleaning build artifacts and CMake cache"
+    COMMAND ${CMAKE_COMMAND} -E echo "Cleaning build artifacts..."
+    COMMAND ${CMAKE_COMMAND} -E rm -rf ${CMAKE_BINARY_DIR}/bin
+    COMMAND ${CMAKE_COMMAND} -E rm -rf ${CMAKE_BINARY_DIR}/lib
+    COMMAND ${CMAKE_COMMAND} -E rm -rf ${CMAKE_BINARY_DIR}/CMakeFiles
+    COMMAND ${CMAKE_COMMAND} -E rm -f ${CMAKE_BINARY_DIR}/CMakeCache.txt
+    COMMAND ${CMAKE_COMMAND} -E rm -f ${CMAKE_BINARY_DIR}/cmake_install.cmake
+    COMMAND ${CMAKE_COMMAND} -E rm -f ${CMAKE_BINARY_DIR}/Makefile
+    COMMAND ${CMAKE_COMMAND} -E rm -f ${CMAKE_BINARY_DIR}/compile_commands.json
+    COMMAND ${CMAKE_COMMAND} -E rm -rf ${CMAKE_BINARY_DIR}/_deps
+    COMMENT "Cleaning all build artifacts, binaries, intermediate files, and CMake cache"
+    VERBATIM
 )
+
+# Note: The standard 'clean' target is provided by CMake automatically.
+# Use 'cmake --build . --target clean' for standard clean, or
+# 'cmake --build . --target clean-build' for deep clean (removes everything).
