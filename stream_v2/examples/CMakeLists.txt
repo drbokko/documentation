@@ -145,6 +145,11 @@ if(WIN32)
         iphlpapi
         ws2_32
     )
+    
+    add_executable(start_stream_eigerclient start_stream_eigerclient.c)
+    target_link_libraries(start_stream_eigerclient
+        winhttp
+    )
 endif()
 
 # Add clean-build target (works on all platforms, especially useful for Windows/Visual Studio)
