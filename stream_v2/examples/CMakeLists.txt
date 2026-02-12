@@ -152,6 +152,30 @@ if(WIN32)
     )
 endif()
 
+# EIGER detector REST API client library (used by start_stream script flow)
+add_library(eiger_client STATIC
+    eiger_client/eiger_client.c
+    eiger_client/eiger_client.h
+    )
+target_include_directories(eiger_client PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/eiger_client)
+if(WIN32)
+    target_link_libraries(eiger_client PRIVATE winhttp)
+else()
+    find_package(CURL QUIET)
+    if(CURL_FOUND)
+        target_compile_definitions(eiger_client PRIVATE USE_LIBCURL=1)
+        target_link_libraries(eiger_client PRIVATE CURL::libcurl)
+    endif()
+endif()
+
+# Demo: configure detector for streaming (same flow as start_stream_eigerclient)
+# Only build when HTTP is available (Windows WinHTTP or Unix libcurl)
+if(WIN32 OR CURL_FOUND)
+    add_executable(eiger_client_demo eiger_client/eiger_client_demo.c)
+    target_include_directories(eiger_client_demo PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/eiger_client)
+    target_link_libraries(eiger_client_demo PRIVATE eiger_client)
+endif()
+
 # Add clean-build target (works on all platforms, especially useful for Windows/Visual Studio)
 # Note: For Makefile generators, 'make clean' already exists and works. This target
 # provides a way to clean everything including CMake cache files.
