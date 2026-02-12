@@ -8,15 +8,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdint.h>
 
 #ifdef _WIN32
 #include <windows.h>
 #include <winhttp.h>
 #pragma comment(lib, "winhttp.lib")
-#else
-#include <unistd.h>
-/* Linux version would need libcurl or similar HTTP library */
 #endif
 
 struct eiger_config {
@@ -206,32 +202,14 @@ static int eiger_http_request(const char* host, int port, const char* method,
 
 static int eiger_set_config(const char* host, int port, const char* param, const char* value) {
     char path[256];
-    char json_data[256];
-    
     snprintf(path, sizeof(path), "/detector/api/v1.0/config/%s", param);
-    
-    if (value[0] == '"' || strcmp(value, "true") == 0 || strcmp(value, "false") == 0) {
-        snprintf(json_data, sizeof(json_data), "%s", value);
-    } else {
-        snprintf(json_data, sizeof(json_data), "%s", value);
-    }
-    
-    return eiger_http_request(host, port, "PUT", path, json_data, NULL, 0);
+    return eiger_http_request(host, port, "PUT", path, value, NULL, 0);
 }
 
 static int eiger_set_stream_config(const char* host, int port, const char* param, const char* value) {
     char path[256];
-    char json_data[256];
-    
     snprintf(path, sizeof(path), "/stream/api/v1.0/config/%s", param);
-    
-    if (value[0] == '"' || strcmp(value, "true") == 0 || strcmp(value, "false") == 0) {
-        snprintf(json_data, sizeof(json_data), "%s", value);
-    } else {
-        snprintf(json_data, sizeof(json_data), "%s", value);
-    }
-    
-    return eiger_http_request(host, port, "PUT", path, json_data, NULL, 0);
+    return eiger_http_request(host, port, "PUT", path, value, NULL, 0);
 }
 
 static int eiger_set_monitor_config(const char* host, int port, const char* param, const char* value) {
@@ -250,10 +228,11 @@ static int eiger_set_filewriter_config(const char* host, int port, const char* p
     
     snprintf(path, sizeof(path), "/filewriter/api/v1.0/config/%s", param);
     
-    if (value[0] == '"' || strcmp(value, "true") == 0 || strcmp(value, "false") == 0) {
-        snprintf(json_data, sizeof(json_data), "%s", value);
-    } else {
+    /* Add quotes if value doesn't already have them and isn't a boolean/number */
+    if (value[0] != '"' && strcmp(value, "true") != 0 && strcmp(value, "false") != 0) {
         snprintf(json_data, sizeof(json_data), "\"%s\"", value);
+    } else {
+        snprintf(json_data, sizeof(json_data), "%s", value);
     }
     
     return eiger_http_request(host, port, "PUT", path, json_data, NULL, 0);
@@ -377,11 +356,6 @@ int main(int argc, char** argv) {
     /* Connect to detector */
     printf("Connecting to detector at %s...\n", config.ip);
     
-    char status_response[1024] = {0};
-    if (eiger_get_status(config.ip, 80, "state", status_response, sizeof(status_response)) == 0) {
-        printf("Detector status retrieved\n");
-    }
-    
     /* Disarm detector */
     printf("Disarming detector...\n");
     eiger_send_command(config.ip, 80, "disarm");
@@ -402,21 +376,6 @@ int main(int argc, char** argv) {
         printf("Detector initialized\n");
     }
     
-    /* Get detector status */
-    char hv_response[1024] = {0};
-    char temp_response[1024] = {0};
-    char hum_response[1024] = {0};
-    
-    if (eiger_get_status(config.ip, 80, "high_voltage/state", hv_response, sizeof(hv_response)) == 0) {
-        printf("High voltage status retrieved\n");
-    }
-    if (eiger_get_status(config.ip, 80, "temperature", temp_response, sizeof(temp_response)) == 0) {
-        printf("Temperature retrieved\n");
-    }
-    if (eiger_get_status(config.ip, 80, "humidity", hum_response, sizeof(hum_response)) == 0) {
-        printf("Humidity retrieved\n");
-    }
-    
     /* Configure detector */
     configure_detector(config.ip, 80, &config);
     
@@ -430,11 +389,7 @@ int main(int argc, char** argv) {
     printf("Detector armed\n");
     
     /* Small delay to ensure detector is ready */
-#ifdef _WIN32
     Sleep(100);
-#else
-    usleep(100000);
-#endif
     
     printf("Triggering acquisition...\n");
     if (eiger_send_command(config.ip, 80, "trigger") != 0) {
@@ -445,11 +400,7 @@ int main(int argc, char** argv) {
     printf("Acquisition triggered\n");
     
     /* Wait a moment before disarming to allow acquisition to start */
-#ifdef _WIN32
     Sleep(500);
-#else
-    usleep(500000);
-#endif
     
     printf("Disarming detector...\n");
     if (eiger_send_command(config.ip, 80, "disarm") != 0) {
