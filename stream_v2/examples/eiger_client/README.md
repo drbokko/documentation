@@ -4,12 +4,18 @@ Small C library that implements the REST API operations used by the **start_stre
 
 ## Functionality
 
-- **Status**: `eiger_get_status(host, port, path, response_buf, size)` – GET `/detector/api/1.6.0/status/{path}` (e.g. `state`, `temperature`, `humidity`, `high_voltage/state`).
-- **Commands**: `eiger_send_command(host, port, command)` – PUT `/detector/api/1.6.0/command/{command}` (`disarm`, `initialize`, `arm`, `trigger`).
+- **Status**: `eiger_get_status(host, port, path, response_buf, size)` – GET `/detector/api/1.8.0/status/{path}` (e.g. `state`, `temperature`, `humidity`, `high_voltage/state`).
+- **Commands**: `eiger_send_command(host, port, command)` – PUT `/detector/api/1.8.0/command/{command}` (`disarm`, `initialize`, `arm`, `trigger`).
 - **Detector config**: `eiger_set_detector_config(host, port, param, value_json)` – PUT config with `{"value": value_json}`.
 - **Stream / monitor / filewriter config**: `eiger_set_stream_config`, `eiger_set_monitor_config`, `eiger_set_filewriter_config` – same pattern for `/stream/`, `/monitor/`, `/filewriter/` APIs.
 
-All paths use API version **1.6.0** to match `start_stream.json`.
+The session segment in URLs defaults to **1.8.0** (same as `start_stream.json`). If your DCU uses another version (e.g. **1.8.0**), set the environment variable **`EIGER_API_VERSION`** before running the client.
+
+On **Windows**, JSON request bodies are sent as **UTF-8** bytes (not UTF-16); older builds that converted the body to wide characters caused PUT commands to fail against the detector.
+
+Failed requests print a line to **stderr** with the HTTP status code (or Win32 error) and the path.
+
+Call **eiger_set_http_trace(stdout)** (or any FILE*) so **eiger_http_request** logs each outgoing line: HTTP method, full URL http://host:port + path, and for PUT the **exact body bytes** sent (same buffer as WinHTTP/curl). Pass **NULL** to disable (default).
 
 ## Build
 

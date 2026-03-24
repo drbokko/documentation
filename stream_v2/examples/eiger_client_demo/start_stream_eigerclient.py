@@ -49,8 +49,8 @@ if __name__ == '__main__':
         # "acquisition_time": "20250430_120924", #  for some manual download of specific h5 files
 
         # Data acquisition parameters
-        "thresholds": [45000],  # Energy thresholds [eV], insert 1 or 2 values
-        "number_of_images": 6000,  # Number of images to capture
+        "thresholds": [15000, 20000],  # Energy thresholds [eV], insert 1 or 2 values
+        "number_of_images": 1000,  # Number of images to capture
         "exposure_time": 1/1000,  # Exposure time per image [s]
         "sleep_time": 0.0,  # Delay between frames [s]
         
@@ -123,6 +123,7 @@ if __name__ == '__main__':
         c.setDetectorConfig("threshold/2/mode", 'disabled')
         logging.debug("Threshold 2: disabled")
 
+
     # Set Acquisition Parameters
     logging.info("Setting acquisition parameters...")
     c.setDetectorConfig("count_time", configuration["exposure_time"])
@@ -153,6 +154,8 @@ if __name__ == '__main__':
     c.setStreamConfig('format', 'cbor')
     c.setStreamConfig('header_detail', 'all')
     logging.info(f"Stream mode: {configuration['stream']}, format: cbor")
+
+    logging.info(f'Photon Energy: {c.detectorConfig("photon_energy")["value"]} eV')
 
     # Run Acquisition
     logging.info("Starting data acquisition...")

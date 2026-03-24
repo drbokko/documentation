@@ -28,6 +28,20 @@ The examples use a shared helper library (`stream2_helpers`) that provides commo
 | `stream2_buffer_decode` | Like `stream2_buffer`, but also decompresses the image data and reports compression statistics (ratio, compressed vs decompressed bytes). Does **not** save files. |
 | `DectrisStream2Receiver_linux` | Like `stream2_buffer_decode`, but writes buffered images to TIFF files on disk using **multi-threaded** parallel writing. Thread count configurable via `--threads` command-line option (default: 10). |
 | `stream2_bifurcator` | **Stream relay/forwarder** for dual-NIC setups. Receives on one interface, buffers in RAM, and re-broadcasts raw messages on another interface without modification. |
+| `stream2_eiger_acquire` | **EIGER + Stream V2** (Windows WinHTTP or Linux with libcurl): configures the DCU over HTTP (`nimages`, `frame_time`, threshold, stream enabled, filewriter/monitor off), arms, sends a software trigger, receives the stream with multiple ZMQ `PULL` threads into RAM, then writes TIFFs under `--out`. See [EIGER acquire usage](#eiger-acquire-stream2_eiger_acquire). |
+
+#### EIGER acquire (`stream2_eiger_acquire`)
+
+Build: same as `eiger_client_demo` (target is only built when WinHTTP is available **or** libcurl is found by CMake).
+
+```sh
+./stream2_eiger_acquire --host 172.31.1.1 --out ./tiff_out --nimages 100 --frame-time 0.001 --threshold 45000
+
+./stream2_eiger_acquire --host DCU --out ./out --nimages 6000 --frame-time 0.002 --count-time 0.001 --threshold 8000 \
+  --http-port 80 --stream-port 31001 --recv-threads 10 --tiff-threads 8
+```
+
+If the detector is not idle, the program calls `initialize` unless you pass `--force-init`. Uses `STREAM2_BUFFER_GB` for the RAM buffer cap (default 20 GB) and `STREAM2_TIFF_THREADS` when `--tiff-threads` is 0.
 
 All buffer-based programs support the `STREAM2_BUFFER_GB` environment variable to set the memory buffer limit (default: 20 GB).
 Tested on a DGX Spark with the ConnectX7 and on a high performance Xeon EDGE server with a ConnectX 6.

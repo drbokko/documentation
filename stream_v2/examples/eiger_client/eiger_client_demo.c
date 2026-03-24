@@ -88,26 +88,27 @@ int main(int argc, char **argv) {
         fprintf(stderr, "Warning: disarm failed\n");
     }
 
-    if (force_init) {
-        printf("Initializing...\n");
-        if (eiger_send_command(host, port, "initialize") != 0) {
-            fprintf(stderr, "Error: initialize failed\n");
-            return 1;
-        }
-    } else {
-        if (eiger_get_status(host, port, "state", response, sizeof(response)) == 0 && response[0]) {
-            if (strstr(response, "\"idle\"") == NULL) {
-                printf("State not idle, initializing...\n");
-                if (eiger_send_command(host, port, "initialize") != 0) {
-                    fprintf(stderr, "Error: initialize failed\n");
-                    return 1;
-                }
+    {
+        int st = eiger_get_status(host, port, "state", response, sizeof(response));
+        if (st == 0 && response[0])
+            printf("State: %s\n", response);
+        int idle_or_ready =
+                (st == 0 && response[0] &&
+                 (strstr(response, "\"idle\"") != NULL || strstr(response, "\"ready\"") != NULL));
+
+        if (force_init || !idle_or_ready) {
+            if (force_init)
+                printf("Initializing (--force-init)...\n");
+            else if (st != 0 || !response[0])
+                printf("State query failed or empty; initializing...\n");
+            else
+                printf("State not idle/ready; initializing...\n");
+            if (eiger_send_command(host, port, "initialize") != 0) {
+                fprintf(stderr, "Error: initialize failed\n");
+                return 1;
             }
         }
     }
-
-    if (eiger_get_status(host, port, "state", response, sizeof(response)) == 0 && response[0])
-        printf("State: %s\n", response);
     if (eiger_get_status(host, port, "high_voltage/state", response, sizeof(response)) == 0 && response[0])
         printf("HV: %s\n", response);
     if (eiger_get_status(host, port, "temperature", response, sizeof(response)) == 0 && response[0])

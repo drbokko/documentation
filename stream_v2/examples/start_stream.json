@@ -6,7 +6,7 @@
 {
   "type": "request",
   "method": "GET",
-  "path": "/detector/api/1.6.0/status/state",
+  "path": "/detector/api/1.8.0/status/state",
   "headers": {
     "Accept": "application/json; charset=utf-8"
   }
@@ -32,7 +32,7 @@
 {
   "type": "request",
   "method": "PUT",
-  "path": "/detector/api/1.6.0/command/disarm",
+  "path": "/detector/api/1.8.0/command/disarm",
   "headers": {
     "Content-type": "text/html"
   }
@@ -47,7 +47,7 @@
 {
   "type": "request",
   "method": "GET",
-  "path": "/detector/api/1.6.0/status/state",
+  "path": "/detector/api/1.8.0/status/state",
   "headers": {
     "Accept": "application/json; charset=utf-8"
   }
@@ -73,7 +73,7 @@
 {
   "type": "request",
   "method": "GET",
-  "path": "/detector/api/1.6.0/status/high_voltage/state",
+  "path": "/detector/api/1.8.0/status/high_voltage/state",
   "headers": {
     "Accept": "application/json; charset=utf-8"
   }
@@ -90,7 +90,7 @@
 {
   "type": "request",
   "method": "GET",
-  "path": "/detector/api/1.6.0/status/temperature",
+  "path": "/detector/api/1.8.0/status/temperature",
   "headers": {
     "Accept": "application/json; charset=utf-8"
   }
@@ -108,7 +108,7 @@
 {
   "type": "request",
   "method": "GET",
-  "path": "/detector/api/1.6.0/status/humidity",
+  "path": "/detector/api/1.8.0/status/humidity",
   "headers": {
     "Accept": "application/json; charset=utf-8"
   }
@@ -126,7 +126,7 @@
 {
   "type": "request",
   "method": "PUT",
-  "path": "/detector/api/1.6.0/config/countrate_correction_applied",
+  "path": "/detector/api/1.8.0/config/countrate_correction_applied",
   "headers": {
     "Content-type": "application/json; charset=utf-8"
   },
@@ -142,7 +142,7 @@
 {
   "type": "request",
   "method": "PUT",
-  "path": "/detector/api/1.6.0/config/retrigger",
+  "path": "/detector/api/1.8.0/config/retrigger",
   "headers": {
     "Content-type": "application/json; charset=utf-8"
   },
@@ -158,7 +158,7 @@
 {
   "type": "request",
   "method": "PUT",
-  "path": "/detector/api/1.6.0/config/counting_mode",
+  "path": "/detector/api/1.8.0/config/counting_mode",
   "headers": {
     "Content-type": "application/json; charset=utf-8"
   },
@@ -174,7 +174,7 @@
 {
   "type": "request",
   "method": "PUT",
-  "path": "/detector/api/1.6.0/config/virtual_pixel_correction_applied",
+  "path": "/detector/api/1.8.0/config/virtual_pixel_correction_applied",
   "headers": {
     "Content-type": "application/json; charset=utf-8"
   },
@@ -190,7 +190,7 @@
 {
   "type": "request",
   "method": "PUT",
-  "path": "/detector/api/1.6.0/config/mask_to_zero",
+  "path": "/detector/api/1.8.0/config/mask_to_zero",
   "headers": {
     "Content-type": "application/json; charset=utf-8"
   },
@@ -206,7 +206,7 @@
 {
   "type": "request",
   "method": "PUT",
-  "path": "/detector/api/1.6.0/config/test_image_mode",
+  "path": "/detector/api/1.8.0/config/test_image_mode",
   "headers": {
     "Content-type": "application/json; charset=utf-8"
   },
@@ -222,7 +222,7 @@
 {
   "type": "request",
   "method": "PUT",
-  "path": "/detector/api/1.6.0/config/flatfield_correction_applied",
+  "path": "/detector/api/1.8.0/config/flatfield_correction_applied",
   "headers": {
     "Content-type": "application/json; charset=utf-8"
   },
@@ -239,7 +239,7 @@
 {
   "type": "request",
   "method": "PUT",
-  "path": "/detector/api/1.6.0/config/threshold/1/mode",
+  "path": "/detector/api/1.8.0/config/threshold/1/mode",
   "headers": {
     "Content-type": "application/json; charset=utf-8"
   },
@@ -256,7 +256,7 @@
 {
   "type": "request",
   "method": "PUT",
-  "path": "/detector/api/1.6.0/config/threshold/1/energy",
+  "path": "/detector/api/1.8.0/config/threshold/1/energy",
   "headers": {
     "Content-type": "application/json; charset=utf-8"
   },
@@ -276,7 +276,7 @@
 {
   "type": "request",
   "method": "PUT",
-  "path": "/detector/api/1.6.0/config/threshold/2/mode",
+  "path": "/detector/api/1.8.0/config/threshold/2/mode",
   "headers": {
     "Content-type": "application/json; charset=utf-8"
   },
@@ -293,7 +293,7 @@
 {
   "type": "request",
   "method": "PUT",
-  "path": "/detector/api/1.6.0/config/count_time",
+  "path": "/detector/api/1.8.0/config/count_time",
   "headers": {
     "Content-type": "application/json; charset=utf-8"
   },
@@ -314,7 +314,7 @@
 {
   "type": "request",
   "method": "PUT",
-  "path": "/detector/api/1.6.0/config/frame_time",
+  "path": "/detector/api/1.8.0/config/frame_time",
   "headers": {
     "Content-type": "application/json; charset=utf-8"
   },
@@ -335,7 +335,7 @@
 {
   "type": "request",
   "method": "PUT",
-  "path": "/detector/api/1.6.0/config/nimages",
+  "path": "/detector/api/1.8.0/config/nimages",
   "headers": {
     "Content-type": "application/json; charset=utf-8"
   },
@@ -351,7 +351,7 @@
 {
   "type": "request",
   "method": "PUT",
-  "path": "/detector/api/1.6.0/config/auto_summation",
+  "path": "/detector/api/1.8.0/config/auto_summation",
   "headers": {
     "Content-type": "application/json; charset=utf-8"
   },
@@ -368,7 +368,7 @@
 {
   "type": "request",
   "method": "GET",
-  "path": "/detector/api/1.6.0/config/count_time",
+  "path": "/detector/api/1.8.0/config/count_time",
   "headers": {
     "Accept": "application/json; charset=utf-8"
   }
@@ -388,7 +388,7 @@
 {
   "type": "request",
   "method": "GET",
-  "path": "/detector/api/1.6.0/config/frame_time",
+  "path": "/detector/api/1.8.0/config/frame_time",
   "headers": {
     "Accept": "application/json; charset=utf-8"
   }
@@ -407,7 +407,7 @@
 {
   "type": "request",
   "method": "PUT",
-  "path": "/monitor/api/1.6.0/config/mode",
+  "path": "/monitor/api/1.8.0/config/mode",
   "headers": {
     "Content-type": "application/json; charset=utf-8"
   },
@@ -421,7 +421,7 @@
 {
   "type": "request",
   "method": "PUT",
-  "path": "/filewriter/api/1.6.0/config/mode",
+  "path": "/filewriter/api/1.8.0/config/mode",
   "headers": {
     "Content-type": "application/json; charset=utf-8"
   },
@@ -435,7 +435,7 @@
 {
   "type": "request",
   "method": "PUT",
-  "path": "/stream/api/1.6.0/config/mode",
+  "path": "/stream/api/1.8.0/config/mode",
   "headers": {
     "Content-type": "application/json; charset=utf-8"
   },
@@ -449,7 +449,7 @@
 {
   "type": "request",
   "method": "PUT",
-  "path": "/stream/api/1.6.0/config/format",
+  "path": "/stream/api/1.8.0/config/format",
   "headers": {
     "Content-type": "application/json; charset=utf-8"
   },
@@ -463,7 +463,7 @@
 {
   "type": "request",
   "method": "PUT",
-  "path": "/stream/api/1.6.0/config/header_detail",
+  "path": "/stream/api/1.8.0/config/header_detail",
   "headers": {
     "Content-type": "application/json; charset=utf-8"
   },
@@ -477,7 +477,7 @@
 {
   "type": "request",
   "method": "PUT",
-  "path": "/detector/api/1.6.0/command/arm",
+  "path": "/detector/api/1.8.0/command/arm",
   "headers": {
     "Content-type": "text/html"
   }
@@ -492,7 +492,7 @@
 {
   "type": "request",
   "method": "PUT",
-  "path": "/detector/api/1.6.0/command/trigger",
+  "path": "/detector/api/1.8.0/command/trigger",
   "headers": {
     "Content-type": "text/html"
   }
@@ -507,7 +507,7 @@
 {
   "type": "request",
   "method": "PUT",
-  "path": "/detector/api/1.6.0/command/disarm",
+  "path": "/detector/api/1.8.0/command/disarm",
   "headers": {
     "Content-type": "text/html"
   }

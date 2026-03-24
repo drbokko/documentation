@@ -174,6 +174,10 @@ if(WIN32 OR CURL_FOUND)
     add_executable(eiger_client_demo eiger_client/eiger_client_demo.c)
     target_include_directories(eiger_client_demo PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/eiger_client)
     target_link_libraries(eiger_client_demo PRIVATE eiger_client)
+
+    add_executable(stream2_eiger_acquire stream2_eiger_acquire.c)
+    target_include_directories(stream2_eiger_acquire PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/eiger_client)
+    target_link_libraries(stream2_eiger_acquire PRIVATE stream2_helpers eiger_client)
 endif()
 
 # Add clean-build target (works on all platforms, especially useful for Windows/Visual Studio)
