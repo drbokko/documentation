@@ -117,11 +117,8 @@ target_link_libraries(stream2_helpers PUBLIC
     Threads::Threads
     )
 
-add_executable(example example.c)
-target_link_libraries(example stream2_helpers)
-
-add_executable(check_stream2 check_stream2.c)
-target_link_libraries(check_stream2 stream2_helpers)
+add_executable(stream2_dump stream2_dump.c)
+target_link_libraries(stream2_dump stream2_helpers)
 
 add_executable(stream2_buffer stream2_buffer.c)
 target_link_libraries(stream2_buffer stream2_helpers)
@@ -150,34 +147,6 @@ if(WIN32)
     target_link_libraries(start_stream_eigerclient
         winhttp
     )
-endif()
-
-# EIGER detector REST API client library (used by start_stream script flow)
-add_library(eiger_client STATIC
-    eiger_client/eiger_client.c
-    eiger_client/eiger_client.h
-    )
-target_include_directories(eiger_client PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/eiger_client)
-if(WIN32)
-    target_link_libraries(eiger_client PRIVATE winhttp)
-else()
-    find_package(CURL QUIET)
-    if(CURL_FOUND)
-        target_compile_definitions(eiger_client PRIVATE USE_LIBCURL=1)
-        target_link_libraries(eiger_client PRIVATE CURL::libcurl)
-    endif()
-endif()
-
-# Demo: configure detector for streaming (same flow as start_stream_eigerclient)
-# Only build when HTTP is available (Windows WinHTTP or Unix libcurl)
-if(WIN32 OR CURL_FOUND)
-    add_executable(eiger_client_demo eiger_client/eiger_client_demo.c)
-    target_include_directories(eiger_client_demo PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/eiger_client)
-    target_link_libraries(eiger_client_demo PRIVATE eiger_client)
-
-    add_executable(stream2_eiger_acquire stream2_eiger_acquire.c)
-    target_include_directories(stream2_eiger_acquire PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/eiger_client)
-    target_link_libraries(stream2_eiger_acquire PRIVATE stream2_helpers eiger_client)
 endif()
 
 # Add clean-build target (works on all platforms, especially useful for Windows/Visual Studio)

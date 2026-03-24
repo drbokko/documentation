@@ -13,8 +13,7 @@ cmake_install.cmake
 Makefile
 compile_commands.json
 stream_v2/examples/_deps/
-check_stream2
-example
+stream2_dump
 *.a
 bin/
 lib/
