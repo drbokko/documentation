@@ -2,21 +2,21 @@
 
 ## C
 
-`stream2.c` and `stream2.h` implement a stream V2 parser using [tinycbor]. [dectris-compression] is used to decompress image channel data.
+`src/stream2.c` and `src/stream2.h` implement a stream V2 parser using [tinycbor]. [dectris-compression] is used to decompress image channel data.
 
 The code requires compiler support for half-float conversions. Any C compiler supporting C11 extension ISO/IEC TS 18661-3 will work. Otherwise, x86-64 intrinsics for SSE2 and F16C are required. If the code does not work with your compiler, please let us know.
 
 #### Library Structure
 
-The examples use a shared helper library (`stream2_helpers`) that provides common functionality:
+The examples use a shared helper library (`stream2_helpers`) built from sources under `src/`:
 
 | Module | Description |
 |--------|-------------|
-| `stream2_common.h/c` | Platform compatibility (Windows/POSIX clock, signal handling) |
-| `stream2_stats.h/c` | Statistics tracking and reporting |
-| `stream2_decompress.h/c` | Decompression helpers |
-| `stream2_image_buffer.h/c` | Image buffering with zero-copy support |
-| `stream2_tiff.h/c` | TIFF file writing (single and multi-threaded) |
+| `src/stream2_common.h/c` | Platform compatibility (Windows/POSIX clock, signal handling) |
+| `src/stream2_stats.h/c` | Statistics tracking and reporting |
+| `src/stream2_decompress.h/c` | Decompression helpers |
+| `src/stream2_image_buffer.h/c` | Image buffering with zero-copy support |
+| `src/tiff_writer.h/c` | TIFF file writing from `stream2_image_buffer` (single- and multi-threaded flush) |
 
 #### Example Programs
 

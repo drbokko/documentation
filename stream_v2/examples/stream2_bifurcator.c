@@ -40,7 +40,7 @@
 #include "stream2_common.h"
 #include "stream2_image_buffer.h"
 #include "stream2_stats.h"
-#include "stream2_tiff.h"
+#include "tiff_writer.h"
 #include "stream2.h"
 #include <zmq.h>
 
@@ -603,7 +603,7 @@ done:
     if (buf.len > 0) {
         int tiff_threads = parse_env_int("STREAM2_TIFF_THREADS", 10);
         printf("\nSaving %zu buffered images to TIFF files...\n", buf.len);
-        stream2_flush_buffer_to_tiff_mt(&buf, tiff_threads);
+        tiff_writer_flush_buffer_mt(&buf, tiff_threads);
         printf("Done saving TIFF files.\n");
     }
 

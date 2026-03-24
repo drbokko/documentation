@@ -76,7 +76,7 @@ set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
 include_directories(
-    "${CMAKE_CURRENT_SOURCE_DIR}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
     "${CMAKE_CURRENT_SOURCE_DIR}/third_party"
     )
 
@@ -89,8 +89,8 @@ if(NOT "${CMAKE_C_COMPILER_ID}" MATCHES "MSVC")
 endif()
 
 add_library(stream2 STATIC
-    stream2.c
-    stream2.h
+    src/stream2.c
+    src/stream2.h
     )
 target_link_libraries(stream2 PRIVATE
     tinycbor
@@ -98,16 +98,16 @@ target_link_libraries(stream2 PRIVATE
 
 # Shared helper library for examples
 add_library(stream2_helpers STATIC
-    stream2_common.c
-    stream2_common.h
-    stream2_stats.c
-    stream2_stats.h
-    stream2_decompress.c
-    stream2_decompress.h
-    stream2_image_buffer.c
-    stream2_image_buffer.h
-    stream2_tiff.c
-    stream2_tiff.h
+    src/stream2_common.c
+    src/stream2_common.h
+    src/stream2_stats.c
+    src/stream2_stats.h
+    src/stream2_decompress.c
+    src/stream2_decompress.h
+    src/stream2_image_buffer.c
+    src/stream2_image_buffer.h
+    src/tiff_writer.c
+    src/tiff_writer.h
     )
 target_link_libraries(stream2_helpers PUBLIC
     ${LIBZMQ_TARGET}

@@ -29,7 +29,7 @@
 #include "stream2_common.h"
 #include "stream2_image_buffer.h"
 #include "stream2_stats.h"
-#include "stream2_tiff.h"
+#include "tiff_writer.h"
 #include <zmq.h>
 
 #pragma comment(lib, "iphlpapi.lib")
@@ -319,7 +319,7 @@ static void autosave_images(struct app_ctx* ctx) {
     /* Get output folder from UI */
     char output_folder[512] = {0};
     GetWindowText(ctx->hOutputFolder, output_folder, sizeof(output_folder));
-    stream2_set_output_path(output_folder);
+    tiff_writer_set_output_path(output_folder);
     
     EnterCriticalSection(&ctx->buf_cs);
     size_t current_len = ctx->buf.len;
@@ -338,7 +338,7 @@ static void autosave_images(struct app_ctx* ctx) {
         }
         /* Write the image directly from buffer */
         uint64_t cbytes = 0, dbytes = 0;
-        stream2_write_one_image(&ctx->buf, i, &cbytes, &dbytes);
+        tiff_writer_write_one_image(&ctx->buf, i, &cbytes, &dbytes);
     }
     
     /* Update last saved index */
@@ -395,7 +395,7 @@ static DWORD WINAPI save_writer_thread(LPVOID arg) {
             break;
 
         uint64_t cbytes = 0, dbytes = 0;
-        stream2_write_one_image(ctx->buf, idx, &cbytes, &dbytes);
+        tiff_writer_write_one_image(ctx->buf, idx, &cbytes, &dbytes);
 
         LONG64 done = InterlockedIncrement64(&ctx->done);
         if (IsWindow(ctx->hwnd)) {
@@ -413,7 +413,7 @@ static DWORD WINAPI save_thread(LPVOID param) {
     /* Get output folder from UI */
     char output_folder[512] = {0};
     GetWindowText(ctx->hOutputFolder, output_folder, sizeof(output_folder));
-    stream2_set_output_path(output_folder);
+    tiff_writer_set_output_path(output_folder);
 
     struct stream2_buffer_ctx snapshot = {0};
     EnterCriticalSection(&ctx->buf_cs);
@@ -452,7 +452,7 @@ static DWORD WINAPI save_thread(LPVOID param) {
         /* Fallback to single-threaded */
         for (size_t i = 0; i < snapshot.len; i++) {
             uint64_t cbytes = 0, dbytes = 0;
-            stream2_write_one_image(&snapshot, i, &cbytes, &dbytes);
+            tiff_writer_write_one_image(&snapshot, i, &cbytes, &dbytes);
             InterlockedExchange64(&ctx->save_done, (LONG64)(i + 1));
             if (IsWindow(ctx->hwnd)) {
                 PostMessage(ctx->hwnd, WM_APP_SAVE_PROGRESS, (WPARAM)(i + 1), (LPARAM)total_images);

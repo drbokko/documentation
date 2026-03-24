@@ -8,7 +8,7 @@
 #include "stream2_common.h"
 #include "stream2_image_buffer.h"
 #include "stream2_stats.h"
-#include "stream2_tiff.h"
+#include "tiff_writer.h"
 #include "stream2.h"
 #include <zmq.h>
 #include <stdio.h>
@@ -324,7 +324,7 @@ int main(int argc, char** argv) {
 
 #ifndef _WIN32
     stream2_stats_report(&s, &buf, 1);
-    stream2_flush_buffer_to_tiff_mt(&buf, num_threads);
+    tiff_writer_flush_buffer_mt(&buf, num_threads);
     if (have_iface_stats) {
         if (read_iface_stats(iface, &net_end) == 0) {
             fprintf(stderr,
@@ -350,7 +350,7 @@ int main(int argc, char** argv) {
     }
 #else
     stream2_stats_report(&s, &buf, 1);
-    stream2_flush_buffer_to_tiff_mt(&buf, num_threads);
+    tiff_writer_flush_buffer_mt(&buf, num_threads);
 #endif
     zmq_msg_close(&msg);
     zmq_close(socket);
