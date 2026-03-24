@@ -130,37 +130,7 @@ pip install cbor2 "dectris-compression~=0.3.0" numpy pyzmq
 python client.py
 ```
 
-### TIFF viewers
 
-Scripts for folders of TIFFs produced by **`DectrisStream2Receiver_linux`** or **`stream2_bifurcator`** (under paths such as `/dev/shm/serie_000001/`).
-
-**Tkinter + matplotlib** (`stream2_tiff_viewer_tk.py` — no PyQt):
-
-```sh
-pip install numpy pillow matplotlib
-python stream2_tiff_viewer_tk.py
-```
-
-**PyQt** (`stream2_tiff_viewer.py` — richer UI):
-
-```sh
-pip install PyQt5 numpy pillow
-# or: PyQt6; on Debian/Ubuntu: sudo apt install python3-pyqt5 python3-numpy python3-pil
-```
-
-If `pip install PyQt5` fails, prefer the Tkinter viewer or install Qt via the system package manager.
-
-**Features (both viewers):** 16–32 bit mono TIFFs, histogram / range controls, palettes, simple series navigation, on-screen metadata when available.
-
-**Optional `metadata.json`** in the series directory for `start_time` (example shape):
-
-```json
-{
-  "series_id": 1,
-  "channel": "data",
-  "start_times": { "1": 0.0, "2": 0.1 }
-}
-```
 
 [dectris-compression]: https://github.com/dectris/compression
 [tinycbor]: https://github.com/intel/tinycbor
