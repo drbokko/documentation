@@ -1,53 +1,65 @@
 # Stream V2 Examples
 
+C examples and small Python tools for receiving and inspecting DECTRIS Stream V2 data over ZeroMQ.
+
+## Layout
+
+| Location | Contents |
+|----------|----------|
+| `src/` | Sources for the static libraries (`stream2`, `stream2_helpers`) |
+| `*.c` in this directory | Executable programs |
+| `third_party/` | tinycbor, compression stack, and other CMake subprojects |
+
 ## C
 
-`src/stream2.c` and `src/stream2.h` implement a stream V2 parser using [tinycbor]. [dectris-compression] is used to decompress image channel data.
+### Requirements
 
-The code requires compiler support for half-float conversions. Any C compiler supporting C11 extension ISO/IEC TS 18661-3 will work. Otherwise, x86-64 intrinsics for SSE2 and F16C are required. If the code does not work with your compiler, please let us know.
+- **Parser and helpers** use [tinycbor] and [dectris-compression] (pulled in via CMake / `third_party`).
+- **Half-precision**: either a C11 compiler with ISO/IEC TS 18661-3 half-float support, or x86-64 with SSE2 and F16C.
 
-#### Library Structure
+### Libraries
 
-The examples use a shared helper library (`stream2_helpers`) built from sources under `src/`:
+CMake builds static targets **`stream2`** (parser) and **`stream2_helpers`** (linked by all C examples):
 
-| Module | Description |
+| Module | Role |
+|--------|------|
+| `src/stream2` | Stream V2 CBOR message parser |
+| `src/stream2_common` | Clock, signals, shared helpers |
+| `src/stream2_stats` | Receive / throughput statistics |
+| `src/stream2_decompress` | Decompress image channels |
+| `src/stream2_image_buffer` | In-memory buffering, optional ZMQ zero-copy |
+| `src/tiff_writer` | Write TIFFs from buffered images (single- or multi-threaded flush) |
+
+### Programs
+
+| Target | Description |
 |--------|-------------|
-| `src/stream2_common.h/c` | Platform compatibility (Windows/POSIX clock, signal handling) |
-| `src/stream2_stats.h/c` | Statistics tracking and reporting |
-| `src/stream2_decompress.h/c` | Decompression helpers |
-| `src/stream2_image_buffer.h/c` | Image buffering with zero-copy support |
-| `src/tiff_writer.h/c` | TIFF file writing from `stream2_image_buffer` (single- and multi-threaded flush) |
+| `stream2_dump` | Decode messages and print to stdout; useful to learn the protocol. |
+| `stream2_buffer` | Receive and buffer images, print stats; does not decompress for storage or write files. |
+| `stream2_buffer_decode` | Same as `stream2_buffer`, then a final pass to decompress and report compression ratios. |
+| `DectrisStream2Receiver_linux` | Buffer, decompress, write TIFFs; `--threads` sets writer threads (default 10). |
+| `stream2_bifurcator` | Relay: listen on one host/port, buffer, forward raw stream on another interface/port. |
 
-#### Example Programs
+**Windows-only targets** (when building on Windows): `DectrisStream2Demo_windows`, `start_stream_eigerclient`.
 
-| Program | Description |
-|---------|-------------|
-| `stream2_dump` | Dumps received Stream V2 messages to stdout. Good starting point to understand the protocol. |
-| `stream2_buffer` | Receives stream data over ZMQ and buffers images in memory (up to a configurable limit). Reports throughput statistics. Uses zero-copy where possible. Does **not** decompress or save files. |
-| `stream2_buffer_decode` | Like `stream2_buffer`, but also decompresses the image data and reports compression statistics (ratio, compressed vs decompressed bytes). Does **not** save files. |
-| `DectrisStream2Receiver_linux` | Like `stream2_buffer_decode`, but writes buffered images to TIFF files on disk using **multi-threaded** parallel writing. Thread count configurable via `--threads` command-line option (default: 10). |
-| `stream2_bifurcator` | **Stream relay/forwarder** for dual-NIC setups. Receives on one interface, buffers in RAM, and re-broadcasts raw messages on another interface without modification. |
+**Buffer cap:** programs that use the image buffer respect **`STREAM2_BUFFER_GB`** (default `20`).
 
-All buffer-based programs support the `STREAM2_BUFFER_GB` environment variable to set the memory buffer limit (default: 20 GB).
-Tested on a DGX Spark with the ConnectX7 and on a high performance Xeon EDGE server with a ConnectX 6.
+**Linux receiver:** optional **`STREAM2_NET_IFACE`** selects the network interface for binding when applicable (see program help / source).
 
-#### Stream Bifurcator Usage
-
-The bifurcator is designed for machines with two fast network interfaces, acting as a relay that buffers data locally while forwarding to downstream consumers.
+### Bifurcator usage
 
 ```sh
 # Receive from 192.168.1.100:31001, publish on 192.168.2.1:31002
 ./stream2_bifurcator 192.168.1.100 192.168.2.1 31002
 ```
 
-Downstream clients should connect using ZMQ_PULL sockets (matching the Stream V2 protocol). Compatible with all Stream V2 client programs like `DectrisStream2Receiver_linux`, `stream2_buffer`, etc. The bifurcator uses PUSH sockets with a timeout, so if receivers can't keep up, sends will timeout (but messages are still buffered locally).
+Downstream clients should use ZMQ `PULL` like other Stream V2 tools. The bifurcator uses `PUSH` with timeouts; slow consumers may see send timeouts while data stays buffered locally.
 
-#### Performance Tuning for ConnectX-6/7 NICs
+On shutdown it can flush buffered images to TIFF; thread count uses **`STREAM2_TIFF_THREADS`** (default `10`, overridable in code paths that call the multi-threaded writer).
 
-For high-performance Mellanox/NVIDIA ConnectX NICs, the bifurcator supports several optimizations:
+### Bifurcator tuning (e.g. ConnectX NICs)
 
 ```sh
-# Optimal settings for ConnectX-6/7 at 100Gbps+
 STREAM2_RCVBUF_MB=512 \
 STREAM2_SNDBUF_MB=512 \
 STREAM2_BUSY_POLL_US=50 \
@@ -57,172 +69,96 @@ STREAM2_REALTIME=1 \
 ./stream2_bifurcator 192.168.1.100 192.168.2.1 31002
 ```
 
-| Environment Variable | Description | Default |
-|---------------------|-------------|---------|
-| `STREAM2_RCVBUF_MB` | Receive socket buffer size in MB | 256 |
-| `STREAM2_SNDBUF_MB` | Send socket buffer size in MB | 256 |
-| `STREAM2_BUSY_POLL_US` | Busy-poll timeout in microseconds (0=disabled) | 0 |
-| `STREAM2_CPU_AFFINITY` | Pin process to specific CPU core | disabled |
-| `STREAM2_IO_THREADS` | Number of ZMQ I/O threads | 2 |
-| `STREAM2_REALTIME` | Enable realtime scheduler priority (requires root) | 0 |
+| Variable | Meaning | Default |
+|----------|---------|---------|
+| `STREAM2_RCVBUF_MB` / `STREAM2_SNDBUF_MB` | ZMQ socket buffers (MB) | 256 |
+| `STREAM2_BUSY_POLL_US` | Busy-poll timeout (µs); `0` = off | 0 |
+| `STREAM2_CPU_AFFINITY` | Pin process to a CPU core | off |
+| `STREAM2_IO_THREADS` | ZMQ I/O threads | 2 |
+| `STREAM2_REALTIME` | Realtime priority (Linux; often needs root) | 0 |
 
-**System tuning for ConnectX NICs:**
+**Host sysctl (Linux, as root)** — raise socket buffer limits when pushing high throughput:
 
 ```sh
-# Increase socket buffer limits (as root)
 sysctl -w net.core.rmem_max=536870912
 sysctl -w net.core.wmem_max=536870912
 sysctl -w net.core.rmem_default=536870912
 sysctl -w net.core.wmem_default=536870912
-
-# Set NIC IRQ affinity to match CPU affinity
-# Check: cat /proc/interrupts | grep mlx5
-# Set: echo <cpu_mask> > /proc/irq/<irq_num>/smp_affinity
-
-# Disable IRQ balancer for dedicated NICs
-systemctl stop irqbalance
 ```
 
-#### Building - Linux
+Match IRQ affinity to your CPU/NIC layout if you pin the process (`/proc/interrupts`, `smp_affinity`). For dedicated NICs, consider stopping `irqbalance`.
 
-To get started, make sure that the submodules are initialized recursively:
+*Tested on DGX systems with ConnectX-7 and on Xeon servers with ConnectX-6.*
+
+### Build — Linux
+
+Initialize submodules, then configure (system libzmq or bundled build):
 
 ```sh
 git submodule update --init --recursive
-```
-
-Building the examples requires libzmq. By default, CMake will try to locate and use an installed version of libzmq. To download and build libzmq from source, set the CMake variable `BUILD_LIBZMQ` to `YES`.
-
-Let `documentation/` be the location where this repository is cloned recursively. Build and run `stream2_dump` with:
-
-```sh
-mkdir examples_build
-cd examples_build
-cmake ../documentation/stream_v2/examples -DCMAKE_BUILD_TYPE=Debug -DBUILD_LIBZMQ=YES
+mkdir build && cd build
+cmake /path/to/documentation/stream_v2/examples -DCMAKE_BUILD_TYPE=Debug -DBUILD_LIBZMQ=YES
 cmake --build .
-./stream2_dump
+./stream2_dump YOUR_DCU_HOST
 ```
 
-#### Building - Windows
+Set **`BUILD_LIBZMQ=YES`** to fetch and build ZeroMQ from source; otherwise CMake expects an installed `libzmq`.
 
-```
-$vs="C:\Program Files\Microsoft Visual Studio\18\Community"
-& "$vs\Common7\Tools\Launch-VsDevShell.ps1" -Arch x86 -HostArch x86
+### Build — Windows
+
+Open a **Visual Studio** developer shell (adjust the path to match your install), then:
+
+```powershell
 cd documentation\stream_v2\examples
 cmake . -DCMAKE_BUILD_TYPE=Debug -DBUILD_LIBZMQ=YES
 cmake --build .
 ```
 
-To clean build artifacts:
-```bash
-# For Makefile generators (Linux/macOS) - removes object files and intermediate build files
-make clean
+### Cleaning
 
-# For all generators - Deep clean (removes binaries, PDB files, ILK files, 
-# intermediate files, CMake cache, and all build artifacts)
-cmake --build . --target clean-build
-
-# Standard clean (CMake built-in, removes build artifacts but keeps cache)
-cmake --build . --target clean
-```
-
-**Note:** The `clean-build` target removes:
-- All executables (`.exe` files) and libraries (`.lib` files)
-- Debug symbol files (`.pdb` files on Windows)
-- Incremental linker files (`.ilk` files on Windows)
-- Object files (`.obj`/`.o` files)
-- CMake cache and generated files
-- Visual Studio project files (`.vcxproj.user`, `.vs` directory)
-- Fetched dependencies build directories (`_deps`)
-
-This provides a complete clean slate for rebuilding from scratch.
+- **Makefile / Ninja:** `cmake --build . --target clean` — removes build products, keeps the CMake cache.
+- **Deep clean:** `cmake --build . --target clean-build` — also removes `bin/`, `lib/`, generated `CMakeFiles`, cache, `compile_commands.json`, and `_deps` under the build tree (full reconfigure next time).
 
 ## Python
 
-### Stream V2 Client
+### `client.py`
 
-`client.py` demonstrates how to receive and decode stream V2 data using Python 3. Fields of type `MultiDimArray` and `TypedArray` are represented as `numpy` arrays.
+Minimal Stream V2 receiver using `cbor2`, `pyzmq`, `numpy`, and `dectris-compression`. `MultiDimArray` / `TypedArray` fields become NumPy arrays.
 
 ```sh
-pip install cbor2 dectris-compression~=0.3.0 numpy pyzmq
+pip install cbor2 "dectris-compression~=0.3.0" numpy pyzmq
 python client.py
 ```
 
-### TIFF Viewer
+### TIFF viewers
 
-Two versions are available for viewing TIFF images saved by `stream2_buffer_tiff` or `stream2_bifurcator`:
+Scripts for folders of TIFFs produced by **`DectrisStream2Receiver_linux`** or **`stream2_bifurcator`** (under paths such as `/dev/shm/serie_000001/`).
 
-#### Option 1: Tkinter Version (Recommended - No PyQt5 required)
+**Tkinter + matplotlib** (`stream2_tiff_viewer_tk.py` — no PyQt):
 
-`stream2_tiff_viewer_tk.py` uses tkinter (comes with Python) and matplotlib. No PyQt5 installation needed.
-
-**Installation:**
 ```sh
 pip install numpy pillow matplotlib
 python stream2_tiff_viewer_tk.py
 ```
 
-#### Option 2: PyQt5 Version (Better UI)
+**PyQt** (`stream2_tiff_viewer.py` — richer UI):
 
-`stream2_tiff_viewer.py` uses PyQt5 for a more polished interface.
-
-**Installation:**
 ```sh
-# Try PyQt5 first
 pip install PyQt5 numpy pillow
-
-# If PyQt5 fails, try PyQt6
-pip install PyQt6 numpy pillow
-
-# Or use system package manager (Linux)
-sudo apt-get install python3-pyqt5 python3-numpy python3-pil  # Ubuntu/Debian
-sudo dnf install python3-qt5 python3-numpy python3-pillow      # Fedora/RHEL
+# or: PyQt6; on Debian/Ubuntu: sudo apt install python3-pyqt5 python3-numpy python3-pil
 ```
 
-**PyQt5 Installation Troubleshooting:**
+If `pip install PyQt5` fails, prefer the Tkinter viewer or install Qt via the system package manager.
 
-If `pip install PyQt5` fails, try:
-1. **Install system dependencies first (Linux):**
-   ```sh
-   sudo apt-get install python3-pyqt5  # Ubuntu/Debian
-   sudo dnf install python3-qt5        # Fedora/RHEL
-   ```
+**Features (both viewers):** 16–32 bit mono TIFFs, histogram / range controls, palettes, simple series navigation, on-screen metadata when available.
 
-2. **Use pre-built wheels:**
-   ```sh
-   pip install --only-binary :all: PyQt5
-   ```
+**Optional `metadata.json`** in the series directory for `start_time` (example shape):
 
-3. **Skip optional dependencies:**
-   ```sh
-   pip install --no-deps PyQt5
-   ```
-
-4. **Use the tkinter version instead** (no PyQt5 needed)
-
-**Features (both versions):**
-- 16-32 bit monochromatic TIFF support
-- Dynamic range adjustment (min/max value selection)
-- Histogram-based range selection (click/drag on histogram)
-- Multiple color palettes (Grayscale, Hot, Cool, Jet, Viridis)
-- Series navigation (previous/next, play/pause movie mode)
-- Metadata display (image_id, series_id, channel, start_time)
-
-**Usage:**
-1. Run either viewer script
-2. Click "Open Series Directory"
-3. Select a directory containing TIFF files (e.g., `/dev/shm/serie_000001/`)
-
-**Note:** To display `start_time` metadata, you need to save metadata separately. The viewer will look for a `metadata.json` file in the series directory with the following format:
 ```json
 {
   "series_id": 1,
   "channel": "data",
-  "start_times": {
-    "1": 0.0,
-    "2": 0.1,
-    ...
-  }
+  "start_times": { "1": 0.0, "2": 0.1 }
 }
 ```
 
